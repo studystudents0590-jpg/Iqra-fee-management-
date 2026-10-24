@@ -57,7 +57,12 @@ td .actionbtn{margin:2px 4px 2px 0;padding:7px 9px;font-size:12px}
 <div class="field"><label>Parent Mobile</label><input id="sPhone" inputmode="numeric" maxlength="15"></div>
 <div class="field"><label>Monthly Fee (₹) *</label><input required id="sFee" type="number" min="0" max="100000" step="1"></div>
 <div class="field"><label>Admission Date *</label><input required id="sAdmissionDate" type="date"></div>
-</div><button class="primary" type="submit" id="saveStudentBtn">Save Student</button><button class="secondary hidden" type="button" id="cancelEditBtn">Cancel Edit</button><span id="studentStatus" class="status"></span></form></div>
+<div class="field"><label>Admission Fee (₹)</label><input id="sAdmissionFee" type="number" min="0" step="1" value="0"></div>
+<div class="field"><label>Annual Renewal Fee (₹)</label><input id="sRenewalFee" type="number" min="0" step="1" value="0"></div>
+<div class="field"><label>Total of 5 Exam Fees (₹)</label><input id="sExamTotal" type="number" min="0" step="1" value="0"><small class="help">Combined fee for 1st Unit, 2nd Unit, Half-Yearly, 3rd Unit and Final Exam.</small></div>
+<div class="field"><label>Fee Concession (Months)</label><input id="sConcessionMonths" type="number" min="0" max="12" step="1" value="0"></div>
+<div class="field"><label>Extra Concession (₹)</label><input id="sConcessionAmount" type="number" min="0" step="1" value="0"></div>
+</div><p class="help">Concession reduces the amount due. Original fee, concession, total paid and outstanding are shown separately. Enter only the fee amounts applicable to this student.</p><button class="primary" type="submit" id="saveStudentBtn">Save Student</button><button class="secondary hidden" type="button" id="cancelEditBtn">Cancel Edit</button><span id="studentStatus" class="status"></span></form></div>
 <div class="panel"><div class="row"><h2 style="flex:1">Student List</h2><input id="studentSearch" placeholder="Search name / class / roll" style="max-width:280px"></div><div id="studentTable" class="empty">Loading students…</div></div>
 </section>
 <section id="collect" class="tab hidden">
@@ -102,9 +107,17 @@ const today=new Date(); const todayISO=()=>`${today.getFullYear()}-${String(toda
 function status(id,msg,ok=false){$(id).textContent=msg;$(id).className='status '+(ok?'good':'bad')}
 function dateFromTimestamp(value){try{if(value&&typeof value.toDate==='function')return value.toDate().toISOString().slice(0,10);if(value&&typeof value.seconds==='number')return new Date(value.seconds*1000).toISOString().slice(0,10)}catch(e){}return ''}
 function studentAdmissionDate(s){return s.admissionDate||dateFromTimestamp(s.createdAt)||''}
-function monthsSinceAdmission(s){const dateText=studentAdmissionDate(s);if(!dateText)return 0;const parts=dateText.split('-').map(Number);if(parts.length!==3||!parts.every(Number.isFinite))return 0;const [y,m,d]=parts;const admission=new Date(y,m-1,d);if(Number.isNaN(admission.getTime())||admission>today)return 0;return Math.max(0,(today.getFullYear()-y)*12+(today.getMonth()-(m-1))+1)}
-function studentTotalDue(s){return monthsSinceAdmission(s)*Number(s.monthlyFee||0)}
+// School fee year runs April through March. Under this school's rule, every active student is charged from April, even if admitted later.
+function feeYearStartYear(){return today.getMonth()>=3?today.getFullYear():today.getFullYear()-1}
+function feeYearMonths(){const start=feeYearStartYear();return Array.from({length:12},(_,i)=>{const monthIndex=3+i;const date=new Date(start,monthIndex,1);return {year:date.getFullYear(),month:date.getMonth(),label:date.toLocaleString('en-US',{month:'long'}),key:`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`}})}
+function monthsSinceAdmission(s){const start=feeYearStartYear();const currentIndex=today.getFullYear()*12+today.getMonth();const startIndex=start*12+3;return Math.max(0,Math.min(12,currentIndex-startIndex+1))}
+function tuitionDue(s){return monthsSinceAdmission(s)*Number(s.monthlyFee||0)}
+function totalExamFee(s){return Number(s.examTotalFee??(Number(s.exam1Fee||0)+Number(s.exam2Fee||0)+Number(s.examHalfFee||0)+Number(s.exam3Fee||0)+Number(s.examFinalFee||0)))}
+function extraFeesDue(s){return Number(s.admissionFee||0)+Number(s.renewalFee||0)+totalExamFee(s)}
+function concessionDue(s){return Math.min(tuitionDue(s),Math.max(0,Number(s.concessionMonths||0))*Number(s.monthlyFee||0))+Math.max(0,Number(s.concessionAmount||0))}
+function studentTotalDue(s){return Math.max(0,tuitionDue(s)+extraFeesDue(s)-concessionDue(s))}
 function studentTotalPaid(id){return payments.filter(p=>p.studentId===id).reduce((sum,p)=>sum+Number(p.amount||0),0)}
+function paymentMonthKey(p){const text=String(p.note||'');const months=['january','february','march','april','may','june','july','august','september','october','november','december'];const match=text.match(/\\b(january|february|march|april|may|june|july|august|september|october|november|december)\\b\\D{0,12}(20\\d{2})/i);if(!match)return '';const month=months.indexOf(match[1].toLowerCase())+1;return `${match[2]}-${String(month).padStart(2,'0')}`}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 async function initFirebase(){
  if(!configured){status('loginStatus','First complete Firebase setup using README.txt.');return}
@@ -134,6 +147,11 @@ $('studentForm').onsubmit=async e=>{
   phone:$('sPhone').value.trim(),
   monthlyFee:Number($('sFee').value),
   admissionDate:$('sAdmissionDate').value,
+  admissionFee:Number($('sAdmissionFee').value||0),
+  renewalFee:Number($('sRenewalFee').value||0),
+  examTotalFee:Number($('sExamTotal').value||0),
+  concessionMonths:Number($('sConcessionMonths').value||0),
+  concessionAmount:Number($('sConcessionAmount').value||0),
   active:true
  };
  try{
@@ -150,6 +168,7 @@ $('studentForm').onsubmit=async e=>{
   }
   e.target.reset();
   $('sAdmissionDate').value=todayISO();
+  for(const id of ['sAdmissionFee','sRenewalFee','sExamTotal','sConcessionMonths','sConcessionAmount'])$(id).value='0';
   await refreshAll();
  }catch(err){status('studentStatus','Could not save: '+err.message)}
 };
@@ -163,6 +182,11 @@ function startEditStudent(id){
  $('sPhone').value=s.phone||'';
  $('sFee').value=Number(s.monthlyFee||0);
  $('sAdmissionDate').value=studentAdmissionDate(s)||todayISO();
+ $('sAdmissionFee').value=Number(s.admissionFee||0);
+ $('sRenewalFee').value=Number(s.renewalFee||0);
+ $('sExamTotal').value=Number(s.examTotalFee??(Number(s.exam1Fee||0)+Number(s.exam2Fee||0)+Number(s.examHalfFee||0)+Number(s.exam3Fee||0)+Number(s.examFinalFee||0)));
+ $('sConcessionMonths').value=Number(s.concessionMonths||0);
+ $('sConcessionAmount').value=Number(s.concessionAmount||0);
  $('saveStudentBtn').textContent='Update Student';
  $('cancelEditBtn').classList.remove('hidden');
  $('studentFormHeading').textContent='Edit Student';
@@ -173,6 +197,7 @@ function cancelStudentEdit(){
  editingStudentId=null;
  $('studentForm').reset();
  $('sAdmissionDate').value=todayISO();
+ for(const id of ['sAdmissionFee','sRenewalFee','sExamTotal','sConcessionMonths','sConcessionAmount'])$(id).value='0';
  $('saveStudentBtn').textContent='Save Student';
  $('cancelEditBtn').classList.add('hidden');
  $('studentFormHeading').textContent='Add Student';
@@ -202,9 +227,24 @@ $('paymentForm').onsubmit=async e=>{e.preventDefault();let student=students.find
 function renderRecent(){let list=[...payments].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,6);$('recentPayments').innerHTML=list.length?'<div class="tablewrap"><table><thead><tr><th>Date</th><th>Student</th><th>Receipt</th><th>Amount</th></tr></thead><tbody>'+list.map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.studentName)}</td><td>${esc(p.receiptNo)}</td><td>${money(p.amount)}</td></tr>`).join('')+'</tbody></table></div>':'<div class="empty">No payments yet.</div>'}
 function renderLedger(){if(!$('ledgerTable'))return;let sid=$('ledgerStudent').value,month=$('ledgerMonth').value.toLowerCase(),search=$('ledgerSearch').value.toLowerCase();let list=[...payments].filter(p=>(!sid||p.studentId===sid)&&(!month||(p.note||'').toLowerCase().includes(month))&&(!search||[p.studentName,p.receiptNo,p.reference,p.note].join(' ').toLowerCase().includes(search))).sort((a,b)=>(b.date||'').localeCompare(a.date||''));$('ledgerTable').innerHTML=list.length?'<div class="tablewrap"><table><thead><tr><th>Date</th><th>Student</th><th>Fee Month / Note</th><th>Method</th><th>Receipt</th><th>Amount</th></tr></thead><tbody>'+list.map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.studentName)}<br><small>${esc(p.className)}</small></td><td>${esc(p.note)}</td><td>${esc(p.method)}</td><td>${esc(p.receiptNo)}</td><td>${money(p.amount)}</td></tr>`).join('')+'</tbody></table></div>':'<div class="empty">No payments match this filter.</div>'}
 for(const id of ['ledgerStudent','ledgerMonth','ledgerSearch'])$(id).addEventListener(id==='ledgerStudent'?'change':'input',renderLedger);
-function renderReports(){const active=students.filter(s=>s.active!==false);const total=active.reduce((sum,s)=>sum+studentTotalDue(s),0);const paid=payments.reduce((sum,p)=>sum+Number(p.amount||0),0);const outstanding=active.reduce((sum,s)=>sum+Math.max(0,studentTotalDue(s)-studentTotalPaid(s.id)),0);$('reportSummary').innerHTML=`<p><b>Students:</b> ${active.length} &nbsp; <b>Recorded payments:</b> ${payments.length}</p><p><b>Total Fee Due:</b> ${money(total)} &nbsp; <b>Total Paid:</b> ${money(paid)} &nbsp; <b>Outstanding:</b> ${money(outstanding)}</p><p class="help">Fee due is calculated from each student's admission month through the current month, using the saved monthly fee. Set the actual admission date for every existing student. Payments are counted from the saved payment records.</p>`;$('duesTable').innerHTML=active.length?'<div class="tablewrap"><table><thead><tr><th>Student</th><th>Class</th><th>Admission Date</th><th>Monthly Fee</th><th>Months Charged</th><th>Total Fee Due</th><th>Total Paid</th><th>Outstanding</th></tr></thead><tbody>'+active.map(s=>{const due=studentTotalDue(s),paidStudent=studentTotalPaid(s.id),out=Math.max(0,due-paidStudent);return `<tr><td>${esc(s.name)}</td><td>${esc(s.className)}</td><td>${esc(studentAdmissionDate(s)||'Missing date')}</td><td>${money(s.monthlyFee)}</td><td>${monthsSinceAdmission(s)}</td><td>${money(due)}</td><td>${money(paidStudent)}</td><td>${money(out)}</td></tr>`}).join('')+'</tbody></table></div>':'<div class="empty">No students found.</div>'}
+function renderReports(){
+ const active=students.filter(s=>s.active!==false);
+ const months=feeYearMonths();
+ const currentMonthIndex=today.getFullYear()*12+today.getMonth();
+ const startIndex=feeYearStartYear()*12+3;
+ const total=active.reduce((sum,s)=>sum+studentTotalDue(s),0);
+ const paid=payments.reduce((sum,p)=>sum+Number(p.amount||0),0);
+ const outstanding=active.reduce((sum,s)=>sum+Math.max(0,studentTotalDue(s)-studentTotalPaid(s.id)),0);
+ const concessions=active.reduce((sum,s)=>sum+concessionDue(s),0);
+ const tuitionOriginal=active.reduce((sum,s)=>sum+tuitionDue(s),0);
+ const extraCharges=active.reduce((sum,s)=>sum+extraFeesDue(s),0);
+ const unallocated=payments.filter(p=>!paymentMonthKey(p)).reduce((sum,p)=>sum+Number(p.amount||0),0);
+ $('reportSummary').innerHTML=`<p><b>Fee Year:</b> April ${feeYearStartYear()} – March ${feeYearStartYear()+1}</p><p><b>Students:</b> ${active.length} &nbsp; <b>Recorded payments:</b> ${payments.length}</p><p><b>Tuition Before Concession:</b> ${money(tuitionOriginal)} &nbsp; <b>Admission/Renewal/All 5 Exam Fees:</b> ${money(extraCharges)}</p><p><b>Total Concession:</b> ${money(concessions)} &nbsp; <b>Total Fee Due After Concession:</b> ${money(total)}</p><p><b>Total Paid:</b> ${money(paid)} &nbsp; <b>Outstanding:</b> ${money(outstanding)}</p><p class="help">School rule: tuition is charged from April for every active student. Enter the applicable admission fee, annual renewal fee and one combined total for all five exams in the student record. Concession months waive that many months of tuition; Extra Concession reduces the total due further. The report shows the concession separately so totals remain traceable.</p>${unallocated>0?`<p class="status bad">Payments not assigned to a month: ${money(unallocated)}. To track month-wise payments, include the month and year in Fee Month / Note, for example “October 2026 Tuition Fee”.</p>`:''}`;
+ const monthHead=months.map(m=>`<th>${m.label}<br><small>${m.year}</small></th>`).join('');
+ $('duesTable').innerHTML=active.length?'<div class="tablewrap"><table><thead><tr><th>Student</th><th>Class</th><th>Admission Date</th><th>Monthly Fee</th><th>Months Charged</th><th>Tuition</th><th>Other Fees</th><th>Concession</th><th>Total Fee Due</th><th>Total Paid</th><th>Outstanding</th></tr></thead><tbody>'+active.map(s=>{const due=studentTotalDue(s),paidStudent=studentTotalPaid(s.id),out=Math.max(0,due-paidStudent);return `<tr><td>${esc(s.name)}</td><td>${esc(s.className)}</td><td>${esc(studentAdmissionDate(s)||'Missing date')}</td><td>${money(s.monthlyFee)}</td><td>${monthsSinceAdmission(s)}</td><td>${money(tuitionDue(s))}</td><td>${money(extraFeesDue(s))}</td><td>${money(concessionDue(s))}</td><td>${money(due)}</td><td>${money(paidStudent)}</td><td>${money(out)}</td></tr>`}).join('')+'</tbody></table></div><h3 style="margin-top:20px">Month-wise Tuition Fee Details</h3><p class="help">Monthly table shows tuition due, payments matched to a month/year in the payment note, and the tuition balance. Admission, renewal and exam fees are included in the total due above, not repeated every month.</p><div class="tablewrap"><table><thead><tr><th>Student</th>'+monthHead+'</tr></thead><tbody>'+active.map(s=>{const fee=Number(s.monthlyFee||0);return `<tr><td>${esc(s.name)}<br><small>Due / Paid / Balance</small></td>`+months.map(m=>{const index=m.year*12+m.month;const isCharged=index>=startIndex&&index<=currentMonthIndex;const monthPaid=payments.filter(p=>p.studentId===s.id&&paymentMonthKey(p)===m.key).reduce((sum,p)=>sum+Number(p.amount||0),0);if(!isCharged)return `<td><small>Not due</small></td>`;const balance=Math.max(0,fee-monthPaid);return `<td><small>Due: ${money(fee)}<br>Paid: ${money(monthPaid)}<br>Balance: ${money(balance)}</small></td>`}).join('')+`</tr>`}).join('')+'</tbody></table></div>':'<div class="empty">No students found.</div>';
+}
 function csvDownload(filename,rows){if(!rows.length){alert('No records to export.');return}const keys=[...new Set(rows.flatMap(r=>Object.keys(r)))];const csv=[keys.join(','),...rows.map(r=>keys.map(k=>{let v=r[k]??'';if(typeof v==='object')v='';return '"'+String(v).replace(/"/g,'""')+'"'}).join(','))].join('\r\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8;'}));a.download=filename;a.click();URL.revokeObjectURL(a.href)}
-$('exportStudents').onclick=$('backupStudents').onclick=()=>csvDownload('iqra-students.csv',students.map(({id,...s})=>({...s,admissionDate:studentAdmissionDate(s),monthsCharged:monthsSinceAdmission(s),totalFeeDue:studentTotalDue(s),totalPaid:studentTotalPaid(id),outstanding:Math.max(0,studentTotalDue(s)-studentTotalPaid(id))})));
+$('exportStudents').onclick=$('backupStudents').onclick=()=>csvDownload('iqra-students.csv',students.map(({id,...s})=>({...s,admissionDate:studentAdmissionDate(s),monthsCharged:monthsSinceAdmission(s),tuitionDue:tuitionDue(s),otherFeesDue:extraFeesDue(s),concessionTotal:concessionDue(s),totalFeeDue:studentTotalDue(s),totalPaid:studentTotalPaid(id),outstanding:Math.max(0,studentTotalDue(s)-studentTotalPaid(id))})));
 $('exportPayments').onclick=$('backupPayments').onclick=()=>csvDownload('iqra-payments.csv',payments.map(({id,...p})=>p));
 $('printReport').onclick=()=>window.print();
 initFirebase();
