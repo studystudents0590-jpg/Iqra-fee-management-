@@ -16,6 +16,7 @@ nav{display:flex;gap:8px;overflow:auto;padding:10px 0 14px}nav button{white-spac
 button.primary,button.secondary,button.danger{border:0;border-radius:8px;padding:11px 14px;font-weight:700;cursor:pointer;margin-top:12px}.primary{background:var(--blue);color:white}.secondary{background:#e8effa;color:var(--blue)}.danger{background:#fee4e2;color:var(--red)}
 .tablewrap{overflow:auto}table{width:100%;border-collapse:collapse;min-width:650px}th,td{text-align:left;padding:10px;border-bottom:1px solid var(--line);font-size:13px}th{background:#f5f8fc;color:#44546a}td small{color:var(--muted)}.empty{padding:22px;text-align:center;color:var(--muted)}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.row>*{flex:1}.hidden{display:none!important}.tag{display:inline-block;background:#e6f7ed;color:var(--green);border-radius:99px;padding:4px 8px;font-size:11px;font-weight:700}.tag.red{background:#ffebe9;color:var(--red)}
 #loginBox{max-width:450px;margin:30px auto}.help{font-size:12px;color:var(--muted);line-height:1.5}.status{font-size:13px;margin-top:10px}.good{color:var(--green)}.bad{color:var(--red)}
+td .actionbtn{margin:2px 4px 2px 0;padding:7px 9px;font-size:12px}
 @media(max-width:720px){main{padding:10px}.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.formgrid{grid-template-columns:repeat(2,minmax(0,1fr))}.panel{padding:12px}header h1{font-size:18px}}
 @media(max-width:420px){.formgrid{grid-template-columns:1fr}.stat strong{font-size:18px}}
 @media print{header,nav,.no-print,.notice{display:none!important}body{background:#fff}main{max-width:none;padding:0}.panel{box-shadow:none;border:0}}
@@ -47,7 +48,7 @@ button.primary,button.secondary,button.danger{border:0;border-radius:8px;padding
 <div class="panel" style="margin-top:14px"><h2>Recent Payments</h2><div id="recentPayments" class="empty">No payments yet.</div></div>
 </section>
 <section id="students" class="tab hidden">
-<div class="panel"><h2>Add Student</h2>
+<div class="panel"><h2 id="studentFormHeading">Add Student</h2>
 <form id="studentForm"><div class="formgrid">
 <div class="field"><label>Student Name *</label><input required id="sName" maxlength="100"></div>
 <div class="field"><label>Class *</label><select required id="sClass"><option value="">Select class</option><option>Nursery</option><option>LKG</option><option>UKG</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option></select></div>
@@ -55,7 +56,7 @@ button.primary,button.secondary,button.danger{border:0;border-radius:8px;padding
 <div class="field"><label>Father / Guardian</label><input id="sGuardian" maxlength="100"></div>
 <div class="field"><label>Parent Mobile</label><input id="sPhone" inputmode="numeric" maxlength="15"></div>
 <div class="field"><label>Monthly Fee (₹) *</label><input required id="sFee" type="number" min="0" max="100000" step="1"></div>
-</div><button class="primary" type="submit">Save Student</button><span id="studentStatus" class="status"></span></form></div>
+</div><button class="primary" type="submit" id="saveStudentBtn">Save Student</button><button class="secondary hidden" type="button" id="cancelEditBtn">Cancel Edit</button><span id="studentStatus" class="status"></span></form></div>
 <div class="panel"><div class="row"><h2 style="flex:1">Student List</h2><input id="studentSearch" placeholder="Search name / class / roll" style="max-width:280px"></div><div id="studentTable" class="empty">Loading students…</div></div>
 </section>
 <section id="collect" class="tab hidden">
@@ -79,12 +80,6 @@ button.primary,button.secondary,button.danger{border:0;border-radius:8px;padding
 </div>
 </main>
 <script type="module">
-/*
-SETUP: Replace the placeholder Firebase config below with the config from
-Firebase Console > Project settings > Your apps > Web app.
-Do not put service-account/private keys here.
-*/
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
   apiKey: "AIzaSyBq8Cdl3Z3EpBd0b5Rh9svLSEu1QW9waHg",
   authDomain: "ips-school-1.firebaseapp.com",
@@ -99,7 +94,7 @@ const setupNotice = document.getElementById('setupNotice');
 if (configured) setupNotice.classList.add('hidden');
 else setupNotice.innerHTML = '<b>Setup required:</b> Firebase config placeholders are still present. Follow README.txt before use.';
 let auth, db, onAuthStateChanged, signInWithEmailAndPassword, signOut, collection, addDoc, getDocs, query, orderBy, serverTimestamp, doc, updateDoc, deleteDoc;
-let students=[], payments=[], charges=[];
+let students=[], payments=[], charges=[], editingStudentId=null;
 const $=id=>document.getElementById(id);
 const money=n=>'₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:2});
 const today=new Date(); $('pDate').value = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
@@ -123,11 +118,77 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.query
 async function loadCollection(name){const snap=await getDocs(query(collection(db,name),orderBy('createdAt','desc'))).catch(async()=>await getDocs(collection(db,name)));return snap.docs.map(d=>({id:d.id,...d.data()}))}
 async function refreshAll(){try{[students,payments,charges]=await Promise.all([loadCollection('students'),loadCollection('payments'),loadCollection('charges')]);renderAll()}catch(e){$('connectionStatus').textContent='Could not load data: '+e.message+' — check Firestore rules.'}}
 function renderAll(){ $('statStudents').textContent=students.filter(s=>s.active!==false).length;$('statCollected').textContent=money(payments.reduce((a,p)=>a+Number(p.amount||0),0));$('statCharges').textContent=money(charges.reduce((a,c)=>a+Number(c.amount||0),0));$('statDue').textContent=money(Math.max(0,charges.reduce((a,c)=>a+Number(c.amount||0),0)-payments.reduce((a,p)=>a+Number(p.amount||0),0)));renderStudents();fillStudentSelects();renderRecent();renderLedger();renderReports()}
-$('studentForm').onsubmit=async e=>{e.preventDefault();try{await addDoc(collection(db,'students'),{name:$('sName').value.trim(),className:$('sClass').value,roll:$('sRoll').value.trim(),guardian:$('sGuardian').value.trim(),phone:$('sPhone').value.trim(),monthlyFee:Number($('sFee').value),active:true,createdAt:serverTimestamp()});e.target.reset();status('studentStatus','Student saved successfully.',true);await refreshAll()}catch(err){status('studentStatus','Could not save: '+err.message)}};
-function renderStudents(){let q=$('studentSearch').value.toLowerCase();let list=students.filter(s=>[s.name,s.className,s.roll,s.guardian].join(' ').toLowerCase().includes(q));$('studentTable').innerHTML=list.length?'<div class="tablewrap"><table><thead><tr><th>Name</th><th>Class</th><th>Roll</th><th>Monthly Fee</th><th>Guardian / Mobile</th><th>Status</th></tr></thead><tbody>'+list.map(s=>`<tr><td>${esc(s.name)}</td><td>${esc(s.className)}</td><td>${esc(s.roll||'-')}</td><td>${money(s.monthlyFee)}</td><td>${esc(s.guardian||'-')}<br><small>${esc(s.phone||'')}</small></td><td><span class="tag">${s.active===false?'Inactive':'Active'}</span></td></tr>`).join('')+'</tbody></table></div>':'<div class="empty">No students found.</div>'}
+$('studentForm').onsubmit=async e=>{
+ e.preventDefault();
+ const data={
+  name:$('sName').value.trim(),
+  className:$('sClass').value,
+  roll:$('sRoll').value.trim(),
+  guardian:$('sGuardian').value.trim(),
+  phone:$('sPhone').value.trim(),
+  monthlyFee:Number($('sFee').value),
+  active:true
+ };
+ try{
+  if(editingStudentId){
+   await updateDoc(doc(db,'students',editingStudentId),data);
+   editingStudentId=null;
+   $('saveStudentBtn').textContent='Save Student';
+   $('cancelEditBtn').classList.add('hidden');
+   $('studentFormHeading').textContent='Add Student';
+   status('studentStatus','Student updated successfully.',true);
+  }else{
+   await addDoc(collection(db,'students'),{...data,createdAt:serverTimestamp()});
+   status('studentStatus','Student saved successfully.',true);
+  }
+  e.target.reset();
+  await refreshAll();
+ }catch(err){status('studentStatus','Could not save: '+err.message)}
+};
+function startEditStudent(id){
+ const s=students.find(x=>x.id===id); if(!s)return;
+ editingStudentId=id;
+ $('sName').value=s.name||'';
+ $('sClass').value=s.className||'';
+ $('sRoll').value=s.roll||'';
+ $('sGuardian').value=s.guardian||'';
+ $('sPhone').value=s.phone||'';
+ $('sFee').value=Number(s.monthlyFee||0);
+ $('saveStudentBtn').textContent='Update Student';
+ $('cancelEditBtn').classList.remove('hidden');
+ $('studentFormHeading').textContent='Edit Student';
+ status('studentStatus','Editing '+(s.name||'student')+'. Make changes and tap Update Student.',true);
+ $('studentForm').scrollIntoView({behavior:'smooth',block:'start'});
+}
+function cancelStudentEdit(){
+ editingStudentId=null;
+ $('studentForm').reset();
+ $('saveStudentBtn').textContent='Save Student';
+ $('cancelEditBtn').classList.add('hidden');
+ $('studentFormHeading').textContent='Add Student';
+ $('studentStatus').textContent='';
+}
+$('cancelEditBtn').onclick=cancelStudentEdit;
+async function deleteStudent(id){
+ const s=students.find(x=>x.id===id); if(!s)return;
+ if(!confirm(`Delete student "${s.name||'this student'}"? This permanently removes the student record. Existing payment records are not deleted.`))return;
+ try{
+  await deleteDoc(doc(db,'students',id));
+  if(editingStudentId===id)cancelStudentEdit();
+  status('studentStatus','Student deleted successfully.',true);
+  await refreshAll();
+ }catch(err){status('studentStatus','Could not delete: '+err.message)}
+}
+function renderStudents(){
+ let q=$('studentSearch').value.toLowerCase();
+ let list=students.filter(s=>[s.name,s.className,s.roll,s.guardian].join(' ').toLowerCase().includes(q));
+ $('studentTable').innerHTML=list.length?'<div class="tablewrap"><table><thead><tr><th>Name</th><th>Class</th><th>Roll</th><th>Monthly Fee</th><th>Guardian / Mobile</th><th>Status</th><th>Actions</th></tr></thead><tbody>'+list.map(s=>`<tr><td>${esc(s.name)}</td><td>${esc(s.className)}</td><td>${esc(s.roll||'-')}</td><td>${money(s.monthlyFee)}</td><td>${esc(s.guardian||'-')}<br><small>${esc(s.phone||'')}</small></td><td><span class="tag ${s.active===false?'red':''}">${s.active===false?'Inactive':'Active'}</span></td><td><button type="button" class="secondary actionbtn" data-edit-student="${esc(s.id)}">Edit</button><button type="button" class="danger actionbtn" data-delete-student="${esc(s.id)}">Delete</button></td></tr>`).join('')+'</tbody></table></div>':'<div class="empty">No students found.</div>';
+ $('studentTable').querySelectorAll('[data-edit-student]').forEach(b=>b.addEventListener('click',()=>startEditStudent(b.dataset.editStudent)));
+ $('studentTable').querySelectorAll('[data-delete-student]').forEach(b=>b.addEventListener('click',()=>deleteStudent(b.dataset.deleteStudent)));
+}
 $('studentSearch').oninput=renderStudents;
 function fillStudentSelects(){for(const id of ['pStudent','ledgerStudent']){let sel=$(id),old=sel.value,all=id==='ledgerStudent';sel.innerHTML=(all?'<option value="">All students</option>':'<option value="">Select student</option>')+students.filter(s=>s.active!==false).sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(s=>`<option value="${s.id}">${esc(s.name)} — ${esc(s.className)}</option>`).join('');sel.value=old}}
-$('paymentForm').onsubmit=async e=>{e.preventDefault();let student=students.find(s=>s.id===$('pStudent').value),amount=Number($('pAmount').value);if(!student){status('paymentStatus','Select a student first.');return}if(!Number.isFinite(amount)||amount<=0){status('paymentStatus','Enter a valid amount.');return}try{let receiptNo='IPS-'+Date.now().toString().slice(-8);let ref=await addDoc(collection(db,'payments'),{studentId:student.id,studentName:student.name,className:student.className,amount,date:$('pDate').value,note:$('pNote').value.trim(),method:$('pMethod').value,reference:$('pRef').value.trim(),receiptNo,createdAt:serverTimestamp()});status('paymentStatus','Payment saved. Receipt: '+receiptNo,true);$('receiptArea').innerHTML=`<div class="panel" id="receipt"><h2>IQRA PUBLIC SCHOOL</h2><p>Fee Payment Receipt</p><hr><p><b>Receipt No:</b> ${esc(receiptNo)}</p><p><b>Date:</b> ${esc($('pDate').value)}</p><p><b>Student:</b> ${esc(student.name)} (${esc(student.className)})</p><p><b>Fee Note:</b> ${esc($('pNote').value)}</p><p><b>Amount Received:</b> ${money(amount)}</p><p><b>Payment Method:</b> ${esc($('pMethod').value)}</p><p><b>Transaction Reference:</b> ${esc($('pRef').value||'-')}</p><p>Authorized Signature: __________________</p><button class="secondary no-print" onclick="window.print()">Print Receipt</button></div>`;e.target.reset();$('pDate').value=today.toISOString().slice(0,10);await refreshAll()}catch(err){status('paymentStatus','Could not save payment: '+err.message)}};
+$('paymentForm').onsubmit=async e=>{e.preventDefault();let student=students.find(s=>s.id===$('pStudent').value),amount=Number($('pAmount').value);if(!student){status('paymentStatus','Select a student first.');return}if(!Number.isFinite(amount)||amount<=0){status('paymentStatus','Enter a valid amount.');return}try{let receiptNo='IPS-'+Date.now().toString().slice(-8);await addDoc(collection(db,'payments'),{studentId:student.id,studentName:student.name,className:student.className,amount,date:$('pDate').value,note:$('pNote').value.trim(),method:$('pMethod').value,reference:$('pRef').value.trim(),receiptNo,createdAt:serverTimestamp()});status('paymentStatus','Payment saved. Receipt: '+receiptNo,true);$('receiptArea').innerHTML=`<div class="panel" id="receipt"><h2>IQRA PUBLIC SCHOOL</h2><p>Fee Payment Receipt</p><hr><p><b>Receipt No:</b> ${esc(receiptNo)}</p><p><b>Date:</b> ${esc($('pDate').value)}</p><p><b>Student:</b> ${esc(student.name)} (${esc(student.className)})</p><p><b>Fee Note:</b> ${esc($('pNote').value)}</p><p><b>Amount Received:</b> ${money(amount)}</p><p><b>Payment Method:</b> ${esc($('pMethod').value)}</p><p><b>Transaction Reference:</b> ${esc($('pRef').value||'-')}</p><p>Authorized Signature: __________________</p><button class="secondary no-print" onclick="window.print()">Print Receipt</button></div>`;e.target.reset();$('pDate').value=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;await refreshAll()}catch(err){status('paymentStatus','Could not save payment: '+err.message)}};
 function renderRecent(){let list=[...payments].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,6);$('recentPayments').innerHTML=list.length?'<div class="tablewrap"><table><thead><tr><th>Date</th><th>Student</th><th>Receipt</th><th>Amount</th></tr></thead><tbody>'+list.map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.studentName)}</td><td>${esc(p.receiptNo)}</td><td>${money(p.amount)}</td></tr>`).join('')+'</tbody></table></div>':'<div class="empty">No payments yet.</div>'}
 function renderLedger(){if(!$('ledgerTable'))return;let sid=$('ledgerStudent').value,month=$('ledgerMonth').value.toLowerCase(),search=$('ledgerSearch').value.toLowerCase();let list=[...payments].filter(p=>(!sid||p.studentId===sid)&&(!month||(p.note||'').toLowerCase().includes(month))&&(!search||[p.studentName,p.receiptNo,p.reference,p.note].join(' ').toLowerCase().includes(search))).sort((a,b)=>(b.date||'').localeCompare(a.date||''));$('ledgerTable').innerHTML=list.length?'<div class="tablewrap"><table><thead><tr><th>Date</th><th>Student</th><th>Fee Month / Note</th><th>Method</th><th>Receipt</th><th>Amount</th></tr></thead><tbody>'+list.map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.studentName)}<br><small>${esc(p.className)}</small></td><td>${esc(p.note)}</td><td>${esc(p.method)}</td><td>${esc(p.receiptNo)}</td><td>${money(p.amount)}</td></tr>`).join('')+'</tbody></table></div>':'<div class="empty">No payments match this filter.</div>'}
 for(const id of ['ledgerStudent','ledgerMonth','ledgerSearch'])$(id).addEventListener(id==='ledgerStudent'?'change':'input',renderLedger);
