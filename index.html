@@ -143,29 +143,86 @@ function paymentMonthEntries(p){
  return [...new Set(entries.filter(Boolean))];
 }
 function renderLedger(){
- if(!$('ledgerTable'))return;
- const sid=$('ledgerStudent').value,year=$('ledgerYear').value,date=$('ledgerDate').value;
- const month=$('ledgerMonth').value.trim().toLowerCase(),search=$('ledgerSearch').value.trim().toLowerCase();
- const matchesMonth=(p)=>{
-   if(!month)return true;
-   const entries=paymentMonthEntries(p);
-   // If a month is explicitly allocated, match only those month labels/keys—not the note.
-   if(entries.length){return entries.some(entry=>entry.includes(month));}
-   return String(p.note||'').toLowerCase().includes(month);
- };
- const list=[...payments].filter(p=>{
-   const monthEntries=paymentMonthEntries(p);
-   const yearMatch=!year||p.feeYear===year||monthEntries.some(entry=>entry.startsWith(year.slice(0,4))||entry.includes(year));
-   return (!sid||p.studentId===sid)&&yearMatch&&(!date||p.date===date)&&matchesMonth(p)&&(!search||[p.studentName,p.className,p.receiptNo,p.reference,p.note,paymentMonthsText(p)].join(' ').toLowerCase().includes(search));
- }).sort((a,b)=>(b.date||'').localeCompare(a.date||'')||String(b.receiptNo||'').localeCompare(String(a.receiptNo||'')));
- const filteredTotal=list.reduce((sum,p)=>sum+Number(p.amount||0),0);
- const selectedStudent=students.find(s=>s.id===sid);
- const allStudentPayments=selectedStudent?payments.filter(p=>p.studentId===sid):[];
- const allStudentTotal=allStudentPayments.reduce((sum,p)=>sum+Number(p.amount||0),0);
- const summary=selectedStudent
-  ? `<div class="ledger-summary"><b>${esc(selectedStudent.name)} — ${esc(selectedStudent.className)}</b><br>All-time payments: ${allStudentPayments.length} &nbsp; | &nbsp; All-time total paid: ${money(allStudentTotal)}<br>Current filter: ${list.length} payment(s) &nbsp; | &nbsp; Filtered amount: ${money(filteredTotal)}</div>`
-  : `<div class="ledger-summary">Matching payments: ${list.length} &nbsp; | &nbsp; Matching amount: ${money(filteredTotal)}</div>`;
- $('ledgerTable').innerHTML=list.length?summary+'<div class="payment-cards">'+list.map((p,i)=>`<article class="payment-card"><div class="row"><b style="flex:1">Payment ${list.length-i}</b><span class="amount">${money(p.amount)}</span></div><div class="meta">Payment Date: ${esc(p.date||'-')}</div><div class="detail"><b>Student:</b> ${esc(p.studentName||'-')} (${esc(p.className||'-')})</div><div class="detail"><b>Fee Month(s):</b> ${esc(paymentMonthsText(p))}</div><div class="detail"><b>Fee Year:</b> ${esc(p.feeYear||'Old record')}</div><div class="detail"><b>Method:</b> ${esc(p.method||'-')}</div><div class="detail"><b>Receipt:</b> ${esc(p.receiptNo||'-')}</div>${p.reference?`<div class="detail"><b>Reference:</b> ${esc(p.reference)}</div>`:''}${p.note?`<div class="detail"><b>Note:</b> ${esc(p.note)}</div>`:''}</article>`).join('')+'</div>':summary+'<div class="empty">No payments match this filter.</div>';
+  const sid = $('ledgerStudent').value;
+  const year = $('ledgerYear').value;
+  const date = $('ledgerDate').value;
+  const month = $('ledgerMonth').value.trim().toLowerCase();
+  const search = $('ledgerSearch').value.trim().toLowerCase();
+
+  function getMonths(p){
+    const values = [];
+
+    if(Array.isArray(p.feeMonthLabels)){
+      values.push(...p.feeMonthLabels);
+    }
+
+    if(Array.isArray(p.feeMonths)){
+      p.feeMonths.forEach(m => {
+        if(typeof m === 'object' && m !== null){
+          values.push(m.label || '');
+        } else if(typeof m === 'string' && !/^\d{4}-\d{2}$/.test(m)){
+          values.push(m);
+        }
+      });
+    }
+
+    return [...new Set(values.filter(Boolean))]
+      .map(v => String(v).trim().toLowerCase());
+  }
+
+  const list = payments.filter(p => {
+    const months = getMonths(p);
+
+    const monthMatch =
+      !month || months.some(m => m.includes(month));
+
+    const yearMatch =
+      !year ||
+      p.feeYear === year ||
+      months.some(m => m.includes(year));
+
+    const searchMatch =
+      !search ||
+      [
+        p.studentName,
+        p.className,
+        p.receiptNo,
+        p.reference,
+        p.note,
+        paymentMonthsText(p)
+      ].join(' ').toLowerCase().includes(search);
+
+    return (!sid || p.studentId === sid) &&
+      (!date || p.date === date) &&
+      monthMatch &&
+      yearMatch &&
+      searchMatch;
+  }).sort((a,b) => (b.date || '').localeCompare(a.date || ''));
+
+  const total = list.reduce(
+    (sum,p) => sum + Number(p.amount || 0), 0
+  );
+
+  $('ledgerTable').innerHTML =
+    `<div class="ledger-summary">
+      Matching payments: ${list.length} |
+      Matching amount: ${money(total)}
+    </div>` +
+    (list.length
+      ? '<div class="payment-cards">' +
+        list.map((p,i) => `
+          <article class="payment-card">
+            <b>Payment ${list.length-i}</b>
+            <div class="amount">${money(p.amount)}</div>
+            <div class="detail">Payment Date: ${esc(p.date || '-')}</div>
+            <div class="detail">Student: ${esc(p.studentName || '-')}</div>
+            <div class="detail">Fee Month(s): ${esc(paymentMonthsText(p))}</div>
+            <div class="detail">Fee Year: ${esc(p.feeYear || 'Old record')}</div>
+            <div class="detail">Method: ${esc(p.method || '-')}</div>
+            <div class="detail">Receipt: ${esc(p.receiptNo || '-')}</div>
+          </article>
+        `).join('') + '</div>'
+      : '<div class="empty">No payments match this filter.</div>');
 }
 for(const id of ['ledgerStudent','ledgerYear','ledgerDate','ledgerMonth','ledgerSearch'])$(id).addEventListener(id==='ledgerStudent'||id==='ledgerYear'||id==='ledgerDate'?'change':'input',renderLedger);
 function renderReports(){const active=students.filter(s=>s.active!==false),total=active.reduce((sum,s)=>sum+studentTotalDue(s),0),paid=payments.reduce((sum,p)=>sum+Number(p.amount||0),0),outstanding=active.reduce((sum,s)=>sum+Math.max(0,studentTotalDue(s)-studentTotalPaid(s.id)),0);$('reportSummary').innerHTML=`<p><b>Students:</b> ${active.length} &nbsp; <b>Recorded payments:</b> ${payments.length}</p><p><b>Total Fee Due:</b> ${money(total)} &nbsp; <b>Total Paid:</b> ${money(paid)} &nbsp; <b>Outstanding:</b> ${money(outstanding)}</p><p class="help">Old payment records without selected fee months are labelled “Not recorded (old payment)” where the fee month is unknown. Their month is not guessed.</p>`;$('duesTable').innerHTML=active.length?'<div class="tablewrap"><table><thead><tr><th>Student</th><th>Class</th><th>Admission Date</th><th>Monthly Fee</th><th>Months Charged</th><th>Total Fee Due</th><th>Total Paid</th><th>Outstanding</th></tr></thead><tbody>'+active.map(s=>{const due=studentTotalDue(s),p=studentTotalPaid(s.id),out=Math.max(0,due-p);return `<tr><td>${esc(s.name)}</td><td>${esc(s.className)}</td><td>${esc(studentAdmissionDate(s)||'Missing date')}</td><td>${money(s.monthlyFee)}</td><td>${monthsSinceAdmission(s)}</td><td>${money(due)}</td><td>${money(p)}</td><td>${money(out)}</td></tr>`}).join('')+'</tbody></table></div>':'<div class="empty">No students found.</div>'}
