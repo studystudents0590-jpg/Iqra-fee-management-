@@ -81,13 +81,28 @@ td .actionbtn{margin:2px 4px 2px 0;padding:7px 9px;font-size:12px}
 </section>
 <section id="ledger" class="tab hidden"><div class="panel"><h2>Fee Ledger</h2><div class="formgrid">
 <div class="field"><label>Student</label><select id="ledgerStudent"><option value="">All students</option></select></div>
+<div class="field"><label>Class</label><select id="ledgerClass"><option value="">All classes</option><option>Nursery</option><option>LKG</option><option>UKG</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option></select></div>
 <div class="field"><label>Fee Year</label><select id="ledgerYear"><option value="">All years</option></select></div>
 <div class="field"><label>Payment Date</label><input id="ledgerDate" type="date"></div>
 <div class="field"><label>Fee Month contains</label><input id="ledgerMonth" placeholder="October"></div>
 <div class="field"><label>Search</label><input id="ledgerSearch" placeholder="Name / receipt / reference / note"></div>
 </div><div id="ledgerTable" class="empty">Loading ledger…</div></div></section>
 <section id="reports" class="tab hidden"><div class="panel"><h2>Fee Reports</h2><div class="row no-print"><button class="secondary" id="exportStudents">Export Students CSV</button><button class="secondary" id="exportPayments">Export Payments CSV</button><button class="secondary" id="printReport">Print Report</button></div><div id="reportSummary" style="margin-top:14px"></div><div id="duesTable"></div></div></section>
-<section id="settings" class="tab hidden"><div class="panel"><h2>Settings & Backup</h2><p>Records are stored in your Firebase cloud database. CSV exports provide an additional copy of your data.</p><div class="row no-print"><button class="secondary" id="backupStudents">Download Students CSV</button><button class="secondary" id="backupPayments">Download Payments CSV</button></div><p class="help">Keep your admin password private. Never share Firebase service-account keys. SMS reminders are not connected in this version and may require a paid SMS provider.</p><p id="connectionStatus" class="status"></p></div></section>
+<section id="settings" class="tab hidden"><div class="panel"><h2>Settings & Backup</h2><p>Records are stored in your Firebase cloud database. CSV exports provide an additional copy of your data.</p><div class="row no-print"><button class="secondary" id="backupStudents">Download Students CSV</button><button class="secondary" id="backupPayments">Download Payments CSV</button></div><div class="panel" style="margin-top:16px">
+<h2>Van Route Management</h2>
+<p class="help">Add, edit or deactivate routes here. Route rates can be changed for a new academic session without changing old payment records.</p>
+<form id="routeForm"><div class="formgrid">
+<div class="field"><label>Route Name *</label><input id="routeName" required maxlength="80" placeholder="e.g. New Village"></div>
+<div class="field"><label>Monthly Van Fee (₹) *</label><input id="routeFee" type="number" required min="0" max="100000" step="1" placeholder="Monthly rate"></div>
+<div class="field"><label>Academic Session *</label><input id="routeSession" required placeholder="e.g. 2026-27"></div>
+</div>
+<button class="primary" type="submit" id="saveRouteBtn">Add / Update Route</button>
+<button class="secondary hidden" type="button" id="cancelRouteEditBtn">Cancel Edit</button>
+<span id="routeStatus" class="status"></span>
+</form>
+<div id="routeTable" class="empty">Loading routes…</div>
+</div>
+<p class="help">Keep your admin password private. Never share Firebase service-account keys. SMS reminders are not connected in this version and may require a paid SMS provider.</p><p id="connectionStatus" class="status"></p></div></section>
 </div></main>
 <script type="module">
 const firebaseConfig = {
@@ -103,13 +118,14 @@ const configured = !Object.values(firebaseConfig).some(v => v.includes("PASTE_YO
 const setupNotice = document.getElementById('setupNotice');
 if (configured) setupNotice.classList.add('hidden'); else setupNotice.innerHTML='<b>Setup required:</b> Firebase config placeholders are still present.';
 let auth,db,onAuthStateChanged,signInWithEmailAndPassword,signOut,collection,addDoc,getDocs,query,orderBy,serverTimestamp,doc,updateDoc,deleteDoc;
-let students=[],payments=[],charges=[],editingStudentId=null;
+let students=[],payments=[],charges=[],editingStudentId=null,vanRoutes=[],editingRouteId=null;
+const DEFAULT_VAN_ROUTES=[{name:'Basrahi',fee:900},{name:'Bake',fee:750},{name:'Alipur',fee:850},{name:'Pilkhuwa',fee:600},{name:'Mauaima',fee:600},{name:'Dubahi',fee:650}];
 const $=id=>document.getElementById(id);
 const money=n=>'₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:2});
 const today=new Date();const todayISO=()=>`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
 $('pDate').value=todayISO();$('sAdmissionDate').value=todayISO();
 const MONTHS=['April','May','June','July','August','September','October','November','December','January','February','March'];
-const VAN_RATES={Basrahi:900,Bake:750,Alipur:850,Pilkhuwa:600,Mauaima:600,Dubahi:650};
+let VAN_RATES={Basrahi:900,Bake:750,Alipur:850,Pilkhuwa:600,Mauaima:600,Dubahi:650};
 const FEE_TYPE_LABELS={school:'Monthly School Fee',van:'Monthly Van Fee',admission:'Admission Fee',renewal:'Renewal Fee',exam:'Exam Fee (5 exams)'};
 function feeCategory(p){return p.feeType||'school'}
 function categoryPaid(studentId,category,session){return payments.filter(p=>p.studentId===studentId&&feeCategory(p)===category&&(!session||p.feeSession===session)).reduce((sum,p)=>sum+Number(p.amount||0),0)}
@@ -124,8 +140,8 @@ function renderMonthOptions(){const yr=$('pFeeYear').value||fyForDate(todayISO()
 $('pFeeYear').addEventListener('change',renderMonthOptions);
 $('pFeeType').addEventListener('change',updateFeePaymentFields);
 $('pStudent').addEventListener('change',()=>{const s=students.find(x=>x.id===$('pStudent').value);if(currentFeeType()==='van'&&s)$('pAmount').value=Number(s.vanFee||0)||'';if(currentFeeType()==='school'&&s)$('pAmount').value=Number(s.monthlyFee||0)||'';updateFeePaymentFields()});
-$('sVanRoute').addEventListener('change',()=>{const route=$('sVanRoute').value;if(route&&VAN_RATES[route])$('sVanFee').value=VAN_RATES[route];});
-$('sVanType').addEventListener('change',()=>{if($('sVanType').value==='no'){$('sVanRoute').value='';$('sVanFee').value='0'}else if($('sVanRoute').value&&VAN_RATES[$('sVanRoute').value])$('sVanFee').value=VAN_RATES[$('sVanRoute').value];});
+$('sVanRoute').addEventListener('change',()=>{const route=$('sVanRoute').value;if(route)$('sVanFee').value=routeFeeForName(route);});
+$('sVanType').addEventListener('change',()=>{if($('sVanType').value==='no'){$('sVanRoute').value='';$('sVanFee').value='0'}else if($('sVanRoute').value)$('sVanFee').value=routeFeeForName($('sVanRoute').value);});
 
 function status(id,msg,ok=false){$(id).textContent=msg;$(id).className='status '+(ok?'good':'bad')}
 function dateFromTimestamp(value){try{if(value&&typeof value.toDate==='function')return value.toDate().toISOString().slice(0,10);if(value&&typeof value.seconds==='number')return new Date(value.seconds*1000).toISOString().slice(0,10)}catch(e){}return ''}
@@ -134,6 +150,89 @@ function monthsSinceAdmission(s){const t=studentAdmissionDate(s);if(!t)return 0;
 function studentTotalDue(s){return monthsSinceAdmission(s)*Number(s.monthlyFee||0)}
 function studentTotalPaid(id){return payments.filter(p=>p.studentId===id&&(!p.feeType||p.feeType==='school')).reduce((sum,p)=>sum+Number(p.amount||0),0)}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+
+function routeFeeForName(name){
+ const route=vanRoutes.find(r=>r.name===name&&r.active!==false);
+ return route?Number(route.fee||0):Number(VAN_RATES[name]||0);
+}
+function refreshRouteSelect(){
+ const select=$('sVanRoute'); if(!select)return;
+ const old=select.value;
+ const active=vanRoutes.filter(r=>r.active!==false).sort((a,b)=>a.name.localeCompare(b.name));
+ select.innerHTML='<option value="">No route</option>'+active.map(r=>`<option value="${esc(r.name)}">${esc(r.name)}</option>`).join('');
+ if(old&&(active.some(r=>r.name===old)||students.some(s=>s.vanRoute===old))) { if(![...select.options].some(o=>o.value===old)) select.insertAdjacentHTML('beforeend',`<option value="${esc(old)}">${esc(old)} (existing student)</option>`); select.value=old; }
+ else if(old&&!active.some(r=>r.name===old))select.value='';
+}
+async function loadVanRoutes(){
+ try{
+   const loaded=await loadCollection('vanRoutes');
+   if(loaded.length){
+     vanRoutes=loaded.map(r=>({...r,name:String(r.name||''),fee:Number(r.fee||0),session:r.session||currentAcademicSession(),active:r.active!==false}));
+   }else{
+     vanRoutes=DEFAULT_VAN_ROUTES.map((r,i)=>({id:'default-'+i,name:r.name,fee:r.fee,session:currentAcademicSession(),active:true,isDefault:true}));
+   }
+ }catch(e){
+   vanRoutes=DEFAULT_VAN_ROUTES.map((r,i)=>({id:'default-'+i,name:r.name,fee:r.fee,session:currentAcademicSession(),active:true,isDefault:true}));
+ }
+ VAN_RATES=Object.fromEntries(vanRoutes.filter(r=>r.active!==false).map(r=>[r.name,Number(r.fee||0)]));
+ refreshRouteSelect(); renderVanRoutes();
+}
+function renderVanRoutes(){
+ const el=$('routeTable'); if(!el)return;
+ const list=[...vanRoutes].sort((a,b)=>a.name.localeCompare(b.name));
+ el.innerHTML=list.length?'<div class="tablewrap"><table><thead><tr><th>Route</th><th>Monthly Fee</th><th>Session</th><th>Status</th><th>Actions</th></tr></thead><tbody>'+
+ list.map(r=>`<tr><td>${esc(r.name)}</td><td>${money(r.fee)}</td><td>${esc(r.session||'-')}</td><td><span class="tag ${r.active===false?'red':''}">${r.active===false?'Inactive':'Active'}</span></td><td><button class="secondary actionbtn" type="button" data-edit-route="${esc(r.id)}">Edit</button>${r.isDefault?'<small>Default route</small>':`<button class="danger actionbtn" type="button" data-toggle-route="${esc(r.id)}">${r.active===false?'Activate':'Deactivate'}</button>`}</td></tr>`).join('')+'</tbody></table></div>':'<div class="empty">No routes added yet.</div>';
+ el.querySelectorAll('[data-edit-route]').forEach(b=>b.onclick=()=>editVanRoute(b.dataset.editRoute));
+ el.querySelectorAll('[data-toggle-route]').forEach(b=>b.onclick=()=>toggleVanRoute(b.dataset.toggleRoute));
+}
+function editVanRoute(id){
+ const r=vanRoutes.find(x=>x.id===id); if(!r)return;
+ editingRouteId=r.id;$('routeName').value=r.name;$('routeFee').value=Number(r.fee||0);$('routeSession').value=r.session||currentAcademicSession();
+ $('saveRouteBtn').textContent='Save Route Changes';$('cancelRouteEditBtn').classList.remove('hidden');status('routeStatus','Editing '+r.name+'.',true);
+}
+function cancelRouteEdit(){
+ editingRouteId=null;$('routeForm').reset();$('routeSession').value=currentAcademicSession();$('saveRouteBtn').textContent='Add / Update Route';$('cancelRouteEditBtn').classList.add('hidden');$('routeStatus').textContent='';
+}
+$('cancelRouteEditBtn').onclick=cancelRouteEdit;
+$('routeSession').value=currentAcademicSession();
+$('routeForm').onsubmit=async e=>{
+ e.preventDefault();
+ const name=$('routeName').value.trim(),fee=Number($('routeFee').value),session=$('routeSession').value.trim();
+ if(!name||!Number.isFinite(fee)||fee<0||!session){status('routeStatus','Enter route name, valid fee and academic session.');return;}
+ const duplicate=vanRoutes.find(r=>r.name.toLowerCase()===name.toLowerCase()&&r.id!==editingRouteId&&r.active!==false);
+ if(duplicate){status('routeStatus','This route name already exists. Edit that route instead.');return;}
+ try{
+   if(editingRouteId){
+     const old=vanRoutes.find(r=>r.id===editingRouteId);
+     if(old&&old.isDefault){
+       const ref=await addDoc(collection(db,'vanRoutes'),{name,fee,session,active:true,createdAt:serverTimestamp()});
+       vanRoutes=vanRoutes.filter(r=>r.id!==editingRouteId);vanRoutes.push({id:ref.id,name,fee,session,active:true});
+     }else{
+       await updateDoc(doc(db,'vanRoutes',editingRouteId),{name,fee,session,active:true,updatedAt:serverTimestamp()});
+       vanRoutes=vanRoutes.map(r=>r.id===editingRouteId?{...r,name,fee,session,active:true}:r);
+     }
+     status('routeStatus','Route updated. Existing student and payment records were not changed.',true);
+   }else{
+     const ref=await addDoc(collection(db,'vanRoutes'),{name,fee,session,active:true,createdAt:serverTimestamp()});
+     vanRoutes.push({id:ref.id,name,fee,session,active:true});
+     status('routeStatus','New route added successfully.',true);
+   }
+   editingRouteId=null;$('routeForm').reset();$('routeSession').value=currentAcademicSession();$('saveRouteBtn').textContent='Add / Update Route';$('cancelRouteEditBtn').classList.add('hidden');
+   VAN_RATES=Object.fromEntries(vanRoutes.filter(r=>r.active!==false).map(r=>[r.name,Number(r.fee||0)]));
+   refreshRouteSelect();renderVanRoutes();
+ }catch(err){status('routeStatus','Could not save route: '+err.message+' (check Firestore rules).')}
+};
+async function toggleVanRoute(id){
+ const r=vanRoutes.find(x=>x.id===id);if(!r||r.isDefault)return;
+ const active=r.active===false;
+ try{
+   await updateDoc(doc(db,'vanRoutes',id),{active,updatedAt:serverTimestamp()});
+   vanRoutes=vanRoutes.map(x=>x.id===id?{...x,active}:x);
+   VAN_RATES=Object.fromEntries(vanRoutes.filter(x=>x.active!==false).map(x=>[x.name,Number(x.fee||0)]));
+   refreshRouteSelect();renderVanRoutes();status('routeStatus',active?'Route activated.':'Route deactivated; existing student records remain unchanged.',true);
+ }catch(err){status('routeStatus','Could not change route status: '+err.message)}
+}
+
 async function initFirebase(){if(!configured){status('loginStatus','Complete Firebase setup first.');return}try{const appMod=await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js');const authMod=await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js');const dbMod=await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js');const app=appMod.initializeApp(firebaseConfig);auth=authMod.getAuth(app);db=dbMod.getFirestore(app);({onAuthStateChanged,signInWithEmailAndPassword,signOut}=authMod);({collection,addDoc,getDocs,query,orderBy,serverTimestamp,doc,updateDoc,deleteDoc}=dbMod);onAuthStateChanged(auth,async user=>{if(user){$('loginBox').classList.add('hidden');$('app').classList.remove('hidden');$('welcome').textContent='Signed in: '+user.email;$('connectionStatus').textContent='Connected to Firebase.';await refreshAll()}else{$('loginBox').classList.remove('hidden');$('app').classList.add('hidden')}})}catch(e){status('loginStatus','Firebase initialization error: '+e.message)}}
 $('loginBtn').onclick=async()=>{try{await signInWithEmailAndPassword(auth,$('loginEmail').value.trim(),$('loginPassword').value);status('loginStatus','Signed in.',true)}catch(e){status('loginStatus',e.code+' — check email/password and Firebase setup.')}}
 $('logoutBtn').onclick=()=>signOut(auth);
@@ -148,7 +247,7 @@ function showStudentArrears(id){const s=students.find(x=>x.id===id);if(!s)return
 function renderPendingStudents(){const active=students.filter(s=>s.active!==false);const selectedClass=$('pendingClassFilter')?.value||'';const search=($('pendingSearch')?.value||'').trim().toLowerCase();const allRows=active.map(pendingForStudent).filter(x=>x.missing.length);const rows=allRows.filter(({s})=>(!selectedClass||String(s.className)===selectedClass)&&(!search||[s.name,s.roll,s.guardian].join(' ').toLowerCase().includes(search)));const el=$('pendingStudents');if(!el)return;const classTotals=rows.reduce((sum,r)=>sum+r.due,0);el.innerHTML=rows.length?`<div class="ledger-summary">Students with pending fee: ${rows.length} &nbsp; | &nbsp; Total pending for selected view: ${money(classTotals)}</div><div class="tablewrap"><table><thead><tr><th>Student (tap name)</th><th>Class</th><th>Pending Months</th><th>Total Pending</th></tr></thead><tbody>${rows.map(({s,missing,due})=>`<tr><td><button type="button" class="secondary actionbtn pending-student-name" data-arrears-student="${esc(s.id)}">${esc(s.name||'-')}</button><br><small>Roll: ${esc(s.roll||'-')}</small></td><td>${esc(s.className||'-')}</td><td><span class="tag red">${missing.length} month(s)</span><br><small>${esc(missing.map(m=>m.label).join(', '))}</small></td><td><b style="color:var(--red)">${money(due)}</b></td></tr>`).join('')}</tbody></table></div><div class="class-total">Total pending fee for ${selectedClass?`Class ${esc(selectedClass)}`:'all classes'}: ${money(classTotals)}</div>`:'<div class="empty">✅ No pending fee students match this class/search.</div>';el.querySelectorAll('[data-arrears-student]').forEach(b=>b.addEventListener('click',()=>showStudentArrears(b.dataset.arrearsStudent)))}
 $('pendingClassFilter').addEventListener('change',()=>{$('pendingStudentDetail').innerHTML='';renderPendingStudents()});
 $('pendingSearch').addEventListener('input',()=>{ $('pendingStudentDetail').innerHTML='';renderPendingStudents()});
-$('studentForm').onsubmit=async e=>{e.preventDefault();const data={name:$('sName').value.trim(),className:$('sClass').value,roll:$('sRoll').value.trim(),guardian:$('sGuardian').value.trim(),phone:$('sPhone').value.trim(),monthlyFee:Number($('sFee').value),vanService:$('sVanType').value,vanRoute:$('sVanRoute').value,vanFee:$('sVanType').value==='yes'?Number($('sVanFee').value||VAN_RATES[$('sVanRoute').value]||0):0,admissionFee:Number($('sAdmissionFee').value||0),renewalFee:Number($('sRenewalFee').value||0),examFee:Number($('sExamFee').value||0),admissionDate:$('sAdmissionDate').value,active:true};try{if(editingStudentId){await updateDoc(doc(db,'students',editingStudentId),data);editingStudentId=null;$('saveStudentBtn').textContent='Save Student';$('cancelEditBtn').classList.add('hidden');$('studentFormHeading').textContent='Add Student';status('studentStatus','Student updated successfully.',true)}else{await addDoc(collection(db,'students'),{...data,createdAt:serverTimestamp()});status('studentStatus','Student saved successfully.',true)}e.target.reset();$('sAdmissionDate').value=todayISO();await refreshAll()}catch(err){status('studentStatus','Could not save: '+err.message)}};
+$('studentForm').onsubmit=async e=>{e.preventDefault();const data={name:$('sName').value.trim(),className:$('sClass').value,roll:$('sRoll').value.trim(),guardian:$('sGuardian').value.trim(),phone:$('sPhone').value.trim(),monthlyFee:Number($('sFee').value),vanService:$('sVanType').value,vanRoute:$('sVanRoute').value,vanFee:$('sVanType').value==='yes'?Number($('sVanFee').value||routeFeeForName($('sVanRoute').value)||0):0,admissionFee:Number($('sAdmissionFee').value||0),renewalFee:Number($('sRenewalFee').value||0),examFee:Number($('sExamFee').value||0),admissionDate:$('sAdmissionDate').value,active:true};try{if(editingStudentId){await updateDoc(doc(db,'students',editingStudentId),data);editingStudentId=null;$('saveStudentBtn').textContent='Save Student';$('cancelEditBtn').classList.add('hidden');$('studentFormHeading').textContent='Add Student';status('studentStatus','Student updated successfully.',true)}else{await addDoc(collection(db,'students'),{...data,createdAt:serverTimestamp()});status('studentStatus','Student saved successfully.',true)}e.target.reset();$('sAdmissionDate').value=todayISO();await refreshAll()}catch(err){status('studentStatus','Could not save: '+err.message)}};
 function startEditStudent(id){const s=students.find(x=>x.id===id);if(!s)return;editingStudentId=id;$('sName').value=s.name||'';$('sClass').value=s.className||'';$('sRoll').value=s.roll||'';$('sGuardian').value=s.guardian||'';$('sPhone').value=s.phone||'';$('sFee').value=Number(s.monthlyFee||0);$('sVanType').value=s.vanService||'no';$('sVanRoute').value=s.vanRoute||'';$('sVanFee').value=Number(s.vanFee||0);$('sAdmissionFee').value=Number(s.admissionFee??3000);$('sRenewalFee').value=Number(s.renewalFee??2000);$('sExamFee').value=Number(s.examFee||0);$('sAdmissionDate').value=studentAdmissionDate(s)||todayISO();$('saveStudentBtn').textContent='Update Student';$('cancelEditBtn').classList.remove('hidden');$('studentFormHeading').textContent='Edit Student';status('studentStatus','Editing '+(s.name||'student')+'.',true);$('studentForm').scrollIntoView({behavior:'smooth',block:'start'})}
 function cancelStudentEdit(){editingStudentId=null;$('studentForm').reset();$('sAdmissionDate').value=todayISO();$('saveStudentBtn').textContent='Save Student';$('cancelEditBtn').classList.add('hidden');$('studentFormHeading').textContent='Add Student';$('studentStatus').textContent=''}
 $('cancelEditBtn').onclick=cancelStudentEdit;
@@ -159,8 +258,8 @@ function fillStudentSelects(){for(const id of ['pStudent','ledgerStudent']){cons
 $('paymentForm').onsubmit=async e=>{e.preventDefault();const student=students.find(s=>s.id===$('pStudent').value),amount=Number($('pAmount').value),type=currentFeeType(),monthly=(type==='school'||type==='van'),checked=[...document.querySelectorAll('input[name="feeMonth"]:checked')];if(!student){status('paymentStatus','Select a student first.');return}if(type==='van'&&student.vanService!=='yes'){status('paymentStatus','This student is not registered for van service. Update the student details first.');return}if(monthly&&!checked.length){status('paymentStatus','Please select at least one fee month.');return}if(!Number.isFinite(amount)||amount<=0){status('paymentStatus','Enter a valid amount.');return}const feeMonths=monthly?checked.map(c=>({key:c.value,label:c.dataset.label})):[];const feeMonthLabels=feeMonths.map(m=>m.label);const note=$('pNote').value.trim(),feeSession=$('pFeeSession').value.trim()||(type==='renewal'||type==='exam'?currentAcademicSession():'');try{const receiptNo='IPS-'+Date.now().toString().slice(-8);const record={studentId:student.id,studentName:student.name,className:student.className,amount,date:$('pDate').value,feeYear:monthly?$('pFeeYear').value:'',feeType:type,feeTypeLabel:FEE_TYPE_LABELS[type],feeSession,feeMonths,feeMonthLabels,note,method:$('pMethod').value,reference:$('pRef').value.trim(),receiptNo,createdAt:serverTimestamp()};await addDoc(collection(db,'payments'),record);status('paymentStatus','Payment saved. Receipt: '+receiptNo,true);$('receiptArea').innerHTML=`<div class="panel" id="receipt"><h2>IQRA PUBLIC SCHOOL</h2><p>Fee Payment Receipt</p><hr><p><b>Receipt No:</b> ${esc(receiptNo)}</p><p><b>Payment Date:</b> ${esc($('pDate').value)}</p><p><b>Student:</b> ${esc(student.name)} (${esc(student.className)})</p><p><b>Fee Type:</b> ${esc(FEE_TYPE_LABELS[type])}</p><p><b>Fee Session/Year:</b> ${esc(feeSession||$('pFeeYear').value||'-')}</p>${monthly?`<p><b>Fee Month(s) paid:</b> ${esc(feeMonthLabels.join(', '))}</p>`:''}<p><b>Amount Received:</b> ${money(amount)}</p><p><b>Payment Method:</b> ${esc($('pMethod').value)}</p><p><b>Transaction Reference:</b> ${esc($('pRef').value||'-')}</p>${note?`<p><b>Note:</b> ${esc(note)}</p>`:''}<p>Authorized Signature: __________________</p><button class="secondary no-print" onclick="window.print()">Print Receipt</button></div>`;e.target.reset();$('pDate').value=todayISO();$('pFeeYear').value=fyForDate(todayISO());renderMonthOptions();updateFeePaymentFields();await refreshAll()}catch(err){status('paymentStatus','Could not save payment: '+err.message)}};
 function paymentMonthsText(p){if(p.feeType&&p.feeType!=='school'&&p.feeType!=='van')return (p.feeTypeLabel||FEE_TYPE_LABELS[p.feeType]||p.feeType)+(p.feeSession?' — '+p.feeSession:'');if(Array.isArray(p.feeMonthLabels)&&p.feeMonthLabels.length)return p.feeMonthLabels.join(', ');if(Array.isArray(p.feeMonths)&&p.feeMonths.length)return p.feeMonths.map(m=>typeof m==='string'?m:(m.label||m.key||'')).filter(Boolean).join(', ');return p.note||'Not recorded (old payment)'}
 function renderRecent(){const list=[...payments].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,6);$('recentPayments').innerHTML=list.length?'<div class="tablewrap"><table><thead><tr><th>Payment Date</th><th>Student</th><th>Fee Type / Month(s)</th><th>Receipt</th><th>Amount</th></tr></thead><tbody>'+list.map(p=>`<tr><td>${esc(p.date||'-')}</td><td>${esc(p.studentName)}</td><td>${esc(paymentMonthsText(p))}</td><td>${esc(p.receiptNo)}</td><td>${money(p.amount)}</td></tr>`).join('')+'</tbody></table></div>':'<div class="empty">No payments yet.</div>'}
-function renderLedger(){if(!$('ledgerTable'))return;const sid=$('ledgerStudent').value,year=$('ledgerYear').value,date=$('ledgerDate').value,month=$('ledgerMonth').value.trim().toLowerCase(),search=$('ledgerSearch').value.trim().toLowerCase();function getMonthLabels(p){const values=[];if(Array.isArray(p.feeMonthLabels))values.push(...p.feeMonthLabels);if(Array.isArray(p.feeMonths))p.feeMonths.forEach(m=>{if(typeof m==='string'){if(!/^\d{4}-\d{2}$/.test(m))values.push(m)}else if(m&&typeof m==='object')values.push(m.label||m.name||'')});return [...new Set(values.filter(Boolean).map(v=>String(v).trim()))]}const list=payments.filter(p=>{const labels=getMonthLabels(p),monthText=labels.join(' ').toLowerCase(),monthMatch=!month||(labels.length?monthText.includes(month):String(p.note||'').toLowerCase().includes(month)),yearMatch=!year||p.feeYear===year||labels.some(v=>v.toLowerCase().includes(year)),searchMatch=!search||[p.studentName,p.className,p.receiptNo,p.reference,p.note,paymentMonthsText(p)].join(' ').toLowerCase().includes(search);return(!sid||p.studentId===sid)&&(!date||p.date===date)&&monthMatch&&yearMatch&&searchMatch}).sort((a,b)=>(b.date||'').localeCompare(a.date||''));const total=list.reduce((sum,p)=>sum+Number(p.amount||0),0),selectedStudent=students.find(s=>s.id===sid),summary=selectedStudent?`<div class="ledger-summary"><b>${esc(selectedStudent.name)} — ${esc(selectedStudent.className)}</b><br>Matching payments: ${list.length} &nbsp; | &nbsp; Matching amount: ${money(total)}</div>`:`<div class="ledger-summary">Matching payments: ${list.length} &nbsp; | &nbsp; Matching amount: ${money(total)}</div>`;$('ledgerTable').innerHTML=summary+(list.length?'<div class="payment-cards">'+list.map((p,i)=>`<article class="payment-card"><div class="row"><b style="flex:1">Payment ${list.length-i}</b><span class="amount">${money(p.amount)}</span></div><div class="meta">Payment Date: ${esc(p.date||'-')}</div><div class="detail"><b>Student:</b> ${esc(p.studentName||'-')} (${esc(p.className||'-')})</div><div class="detail"><b>Fee Type / Month(s):</b> ${esc(p.feeTypeLabel||FEE_TYPE_LABELS[p.feeType]||'Monthly School Fee')} — ${esc(paymentMonthsText(p))}</div><div class="detail"><b>Fee Year:</b> ${esc(p.feeYear||'Old record')}</div><div class="detail"><b>Method:</b> ${esc(p.method||'-')}</div><div class="detail"><b>Receipt:</b> ${esc(p.receiptNo||'-')}</div>${p.reference?`<div class="detail"><b>Reference:</b> ${esc(p.reference)}</div>`:''}${p.note?`<div class="detail"><b>Note:</b> ${esc(p.note)}</div>`:''}</article>`).join('')+'</div>':'<div class="empty">No payments match this filter.</div>')}
-for(const id of ['ledgerStudent','ledgerYear','ledgerDate','ledgerMonth','ledgerSearch'])$(id).addEventListener(['ledgerStudent','ledgerYear','ledgerDate'].includes(id)?'change':'input',renderLedger);
+function renderLedger(){if(!$('ledgerTable'))return;const sid=$('ledgerStudent').value,className=$('ledgerClass').value,year=$('ledgerYear').value,date=$('ledgerDate').value,month=$('ledgerMonth').value.trim().toLowerCase(),search=$('ledgerSearch').value.trim().toLowerCase();function getMonthLabels(p){const values=[];if(Array.isArray(p.feeMonthLabels))values.push(...p.feeMonthLabels);if(Array.isArray(p.feeMonths))p.feeMonths.forEach(m=>{if(typeof m==='string'){if(!/^\d{4}-\d{2}$/.test(m))values.push(m)}else if(m&&typeof m==='object')values.push(m.label||m.name||'')});return [...new Set(values.filter(Boolean).map(v=>String(v).trim()))]}const list=payments.filter(p=>{const labels=getMonthLabels(p),monthText=labels.join(' ').toLowerCase(),monthMatch=!month||(labels.length?monthText.includes(month):String(p.note||'').toLowerCase().includes(month)),yearMatch=!year||p.feeYear===year||labels.some(v=>v.toLowerCase().includes(year)),searchMatch=!search||[p.studentName,p.className,p.receiptNo,p.reference,p.note,paymentMonthsText(p)].join(' ').toLowerCase().includes(search);return(!sid||p.studentId===sid)&&(!className||String(p.className||'')===className)&&(!date||p.date===date)&&monthMatch&&yearMatch&&searchMatch}).sort((a,b)=>(b.date||'').localeCompare(a.date||''));const total=list.reduce((sum,p)=>sum+Number(p.amount||0),0),selectedStudent=students.find(s=>s.id===sid),summary=selectedStudent?`<div class="ledger-summary"><b>${esc(selectedStudent.name)} — ${esc(selectedStudent.className)}</b><br>Matching payments: ${list.length} &nbsp; | &nbsp; Matching amount: ${money(total)}</div>`:`<div class="ledger-summary">Matching payments: ${list.length} &nbsp; | &nbsp; Matching amount: ${money(total)}</div>`;$('ledgerTable').innerHTML=summary+(list.length?'<div class="payment-cards">'+list.map((p,i)=>`<article class="payment-card"><div class="row"><b style="flex:1">Payment ${list.length-i}</b><span class="amount">${money(p.amount)}</span></div><div class="meta">Payment Date: ${esc(p.date||'-')}</div><div class="detail"><b>Student:</b> ${esc(p.studentName||'-')} (${esc(p.className||'-')})</div><div class="detail"><b>Fee Type / Month(s):</b> ${esc(p.feeTypeLabel||FEE_TYPE_LABELS[p.feeType]||'Monthly School Fee')} — ${esc(paymentMonthsText(p))}</div><div class="detail"><b>Fee Year:</b> ${esc(p.feeYear||'Old record')}</div><div class="detail"><b>Method:</b> ${esc(p.method||'-')}</div><div class="detail"><b>Receipt:</b> ${esc(p.receiptNo||'-')}</div>${p.reference?`<div class="detail"><b>Reference:</b> ${esc(p.reference)}</div>`:''}${p.note?`<div class="detail"><b>Note:</b> ${esc(p.note)}</div>`:''}</article>`).join('')+'</div>':'<div class="empty">No payments match this filter.</div>')}
+for(const id of ['ledgerStudent','ledgerClass','ledgerYear','ledgerDate','ledgerMonth','ledgerSearch'])$(id).addEventListener(['ledgerStudent','ledgerClass','ledgerYear','ledgerDate'].includes(id)?'change':'input',renderLedger);
 function renderReports(){const active=students.filter(s=>s.active!==false),total=active.reduce((sum,s)=>sum+studentTotalDue(s),0),paid=payments.reduce((sum,p)=>sum+Number(p.amount||0),0),outstanding=active.reduce((sum,s)=>sum+Math.max(0,studentTotalDue(s)-studentTotalPaid(s.id)),0);$('reportSummary').innerHTML=`<p><b>Students:</b> ${active.length} &nbsp; <b>Recorded payments:</b> ${payments.length}</p><p><b>Total Fee Due:</b> ${money(total)} &nbsp; <b>Total Paid:</b> ${money(paid)} &nbsp; <b>Outstanding:</b> ${money(outstanding)}</p><p><b>Separate fee categories:</b> Admission, annual renewal, five-exam total, monthly school fee and route-wise monthly van fee are tracked separately. For each student, admission/renewal/exam amounts are configured in the student profile.</p><p class="help">Old payment records without selected fee months are labelled “Not recorded (old payment)” where the fee month is unknown. Their month is not guessed.</p>`;$('duesTable').innerHTML=active.length?'<div class="tablewrap"><table><thead><tr><th>Student</th><th>Class</th><th>Admission Date</th><th>Monthly Fee</th><th>Months Charged (April Start)</th><th>Total Fee Due</th><th>Total Paid</th><th>Outstanding</th></tr></thead><tbody>'+active.map(s=>{const due=studentTotalDue(s),p=studentTotalPaid(s.id),out=Math.max(0,due-p);return `<tr><td>${esc(s.name)}</td><td>${esc(s.className)}</td><td>${esc(studentAdmissionDate(s)||'Missing date')}</td><td>${money(s.monthlyFee)}</td><td>${monthsSinceAdmission(s)}</td><td>${money(due)}</td><td>${money(p)}</td><td>${money(out)}</td></tr>`}).join('')+'</tbody></table></div>':'<div class="empty">No students found.</div>'}
 function csvDownload(filename,rows){if(!rows.length){alert('No records to export.');return}const keys=[...new Set(rows.flatMap(r=>Object.keys(r)))];const csv=[keys.join(','),...rows.map(r=>keys.map(k=>{let v=r[k]??'';if(typeof v==='object')v=JSON.stringify(v);return '"'+String(v).replace(/"/g,'""')+'"'}).join(','))].join('\r\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8;'}));a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 $('exportStudents').onclick=$('backupStudents').onclick=()=>csvDownload('iqra-students.csv',students.map(({id,...s})=>({...s,admissionDate:studentAdmissionDate(s),monthsCharged:monthsSinceAdmission(s),totalFeeDue:studentTotalDue(s),totalPaid:studentTotalPaid(id),outstanding:Math.max(0,studentTotalDue(s)-studentTotalPaid(id))})));
