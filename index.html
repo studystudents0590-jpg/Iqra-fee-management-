@@ -23,6 +23,12 @@ td .actionbtn{margin:2px 4px 2px 0;padding:7px 9px;font-size:12px}
 @media(max-width:720px){main{padding:10px}.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.formgrid{grid-template-columns:repeat(2,minmax(0,1fr))}.panel{padding:12px}header h1{font-size:18px}}
 @media(max-width:420px){.formgrid{grid-template-columns:1fr}.month-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.stat strong{font-size:18px}}
 @media print{header,nav,.no-print,.notice{display:none!important}body{background:#fff}main{max-width:none;padding:0}.panel{box-shadow:none;border:0}}
+
+.fee-type-buttons{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
+.fee-type-choice{width:100%;min-height:48px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#123b70;font:inherit;font-size:14px;text-align:left;cursor:pointer}
+.fee-type-choice.active{background:#123b70;color:#fff;border-color:#123b70;font-weight:700;box-shadow:0 0 0 2px rgba(18,59,112,.12)}
+@media(min-width:700px){.fee-type-buttons{grid-template-columns:repeat(3,minmax(0,1fr))}}
+
 </style>
 </head>
 <body>
@@ -76,7 +82,13 @@ td .actionbtn{margin:2px 4px 2px 0;padding:7px 9px;font-size:12px}
 <div class="field"><label>Class Filter</label><select id="pStudentClass"><option value="">All Classes</option></select></div>
 <div class="field"><label>Search Student Name</label><input id="pStudentSearch" type="search" placeholder="Type student name / roll number"></div>
 <div class="field"><label>Student *</label><select id="pStudent" required><option value="">Select student</option></select><small class="help" id="pStudentCount">All active students</small></div>
-<div class="field"><label>Fee Type *</label><select id="pFeeType" required><option value="school">Monthly School Fee</option><option value="van">Monthly Van Fee</option><option value="admission">Admission Fee (one time)</option><option value="renewal">Renewal Fee (annual)</option><option value="exam">Total Exam Fee (5 exams)</option></select></div>
+<div class="field fee-type-field"><label>Choose Fee Type *</label><p class="help">Monthly School Fee sabhi students ke liye monthly hai. Monthly Van Fee bhi har mahine hoti hai, lekin sirf van lene wale students ke liye. Admission, Renewal aur Exam Fee sirf jab applicable/due ho tab select karein.</p><div id="feeTypeButtons" class="fee-type-buttons">
+<button type="button" class="fee-type-choice active" data-fee-type="school">Monthly School Fee (Regular)</button>
+<button type="button" class="fee-type-choice" data-fee-type="van">Monthly Van Fee (Van Users Only)</button>
+<button type="button" class="fee-type-choice" data-fee-type="admission">Admission Fee (New Admission)</button>
+<button type="button" class="fee-type-choice" data-fee-type="renewal">Renewal Fee (If Due)</button>
+<button type="button" class="fee-type-choice" data-fee-type="exam">Exam Fee (If Due)</button>
+</div><select id="pFeeType" required style="display:none"><option value="school">Monthly School Fee</option><option value="van">Monthly Van Fee</option><option value="admission">Admission Fee (one time)</option><option value="renewal">Renewal Fee (annual)</option><option value="exam">Total Exam Fee (5 exams)</option></select></div>
 <div class="field"><label>Fee Session / Year</label><input id="pFeeSession" placeholder="e.g. 2026-27"></div>
 <div class="field"><label>Payment Date (kis din jama hui) *</label><input id="pDate" type="date" required></div>
 <div class="field"><label>Fee Year *</label><select id="pFeeYear" required></select></div>
@@ -84,7 +96,7 @@ td .actionbtn{margin:2px 4px 2px 0;padding:7px 9px;font-size:12px}
 <div class="field"><label>Payment Method</label><select id="pMethod"><option>Cash</option><option>UPI</option><option>Bank Transfer</option><option>Cheque</option><option>Other</option></select></div>
 <div class="field"><label>Transaction Reference (optional)</label><input id="pRef" maxlength="100"></div>
 </div>
-<div class="field" id="feeMonthsField" style="margin-top:14px"><label>Fee Months Paid (select one or more) *</label><div id="feeMonthOptions" class="month-grid"></div><div class="pillnote">Payment date aur fee month alag hain. School/van monthly fee ke liye months select karein. Admission, renewal aur exam fee ke liye months select karne ki zaroorat nahi.</div></div>
+<div class="field" id="feeMonthsField" style="margin-top:14px"><label>Fee Months Paid (select one or more) *</label><div id="feeMonthOptions" class="month-grid"></div><div class="pillnote">Monthly School Fee sabhi students ke liye hai. Monthly Van Fee har mahine van users ke liye hai. School Fee aur Van Fee dono ke liye jama kiye gaye month(s) select karein. Admission, Renewal aur Exam Fee sirf jab applicable/due ho tab select karein; inke liye month select karna zaroori nahi.</div></div>
 <div class="field" style="margin-top:12px"><label>Extra Note (optional)</label><input id="pNote" maxlength="200" placeholder="e.g. cash received from father"></div>
 <button class="primary" type="submit">Record Payment & Create Receipt</button><div id="paymentStatus" class="status"></div></form></div>
 <div id="receiptArea"></div>
@@ -149,6 +161,11 @@ function setupYearSelects(){const years=availableYears();$('pFeeYear').innerHTML
 function renderMonthOptions(){const yr=$('pFeeYear').value||fyForDate(todayISO());$('feeMonthOptions').innerHTML=MONTHS.map((m,i)=>{const calYear=i<9?fyStart(yr):fyStart(yr)+1;const key=`${calYear}-${String(i<9?i+4:i-8).padStart(2,'0')}`;return `<label class="month-option"><input type="checkbox" name="feeMonth" value="${key}" data-label="${m} ${calYear}"><span>${m} ${calYear}</span></label>`}).join('');$('feeMonthOptions').querySelectorAll('input').forEach(cb=>cb.addEventListener('change',()=>cb.closest('.month-option').classList.toggle('selected',cb.checked)))}
 $('pFeeYear').addEventListener('change',renderMonthOptions);
 $('pFeeType').addEventListener('change',updateFeePaymentFields);
+document.querySelectorAll('[data-fee-type]').forEach(btn=>btn.addEventListener('click',()=>{
+ $('pFeeType').value=btn.dataset.feeType;
+ document.querySelectorAll('[data-fee-type]').forEach(b=>b.classList.toggle('active',b===btn));
+ $('pFeeType').dispatchEvent(new Event('change'));
+}));
 $('pStudent').addEventListener('change',()=>{const s=students.find(x=>x.id===$('pStudent').value);if(currentFeeType()==='van'&&s)$('pAmount').value=Number(s.vanFee||0)||'';if(currentFeeType()==='school'&&s)$('pAmount').value=Number(s.monthlyFee||0)||'';updateFeePaymentFields()});
 $('sVanRoute').addEventListener('change',()=>{const route=$('sVanRoute').value;if(route)$('sVanFee').value=routeFeeForName(route);});
 $('sVanType').addEventListener('change',()=>{if($('sVanType').value==='no'){$('sVanRoute').value='';$('sVanFee').value='0'}else if($('sVanRoute').value)$('sVanFee').value=routeFeeForName($('sVanRoute').value);});
