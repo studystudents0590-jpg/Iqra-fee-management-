@@ -107,11 +107,13 @@ td .actionbtn{margin:2px 4px 2px 0;padding:7px 9px;font-size:12px}
 <div class="panel" style="margin-top:12px"><h3>1. Monthly School Fee</h3>
 <div class="field"><label>School Fee Amount (₹)</label><input id="schoolAmount" type="number" min="0" step="1" placeholder="School fee amount"></div>
 <div class="field" style="margin-top:10px"><label>School Fee Months Paid (select one or more)</label><div id="schoolMonthOptions" class="month-grid"></div></div></div>
-<div class="panel" id="livePaymentTotalPanel" style="margin-top:12px;border-left:5px solid #123b70"><h3>Total Amount (Automatic)</h3><p style="font-size:24px;font-weight:700;margin:8px 0" id="livePaymentTotal">₹0</p><p class="help">School Fee, Van Fee aur selected Admission/Renewal/Exam Fee ka amount total mein automatically judega.</p></div>
+
 <div class="panel" style="margin-top:12px"><h3>2. Monthly Van Fee (Van Users Only)</h3>
 <div class="field"><label>Van Fee Amount (₹)</label><input id="vanAmount" type="number" min="0" step="1" placeholder="Van fee amount"></div>
 <div class="field" style="margin-top:10px"><label>Van Fee Months Paid (select one or more)</label><div id="vanMonthOptions" class="month-grid"></div></div>
 <p class="pillnote">Agar student van use nahi karta, to Van Fee amount aur months khaali chhod dein.</p></div>
+<div class="panel" id="livePaymentTotalPanel" style="margin-top:12px;border-left:5px solid #123b70"><h3>Total Amount (Automatic)</h3><p style="font-size:24px;font-weight:700;margin:8px 0" id="livePaymentTotal">₹0</p><p class="help">Total of Admission Fee + Renewal Fee + Exam Fee + Monthly School Fee + Monthly Van Fee.</p></div>
+
 <div class="field" id="feeMonthsField" style="display:none"><label id="feeMonthsLabel">Fee Months Paid</label><div id="feeMonthOptions" class="month-grid"></div><div class="pillnote" id="feeMonthsHelp"></div></div>
 <div class="field" style="margin-top:12px"><label>Extra Note (optional)</label><input id="pNote" maxlength="200" placeholder="e.g. cash received from father"></div>
 <button class="primary" type="submit">Record Payment & Create Receipt</button><div id="paymentStatus" class="status"></div></form></div>
@@ -184,19 +186,21 @@ document.querySelectorAll('[data-fee-type]').forEach(btn=>btn.addEventListener('
  updateLivePaymentTotal();
 }));
 function updateLivePaymentTotal(){
- const type=currentFeeType();
- let total=0;
- if(type==='admission') total=Number($('pAdmissionAmount').value||0);
- else if(type==='renewal') total=Number($('pRenewalAmount').value||0);
- else if(type==='exam') total=Number($('pExamAmount').value||0);
- else total=Number($('schoolAmount').value||0)+Number($('vanAmount').value||0);
- const el=$('livePaymentTotal');
- if(el)el.textContent=money(total);
+ const admission = Number($('pAdmissionAmount')?.value || 0);
+ const renewal = Number($('pRenewalAmount')?.value || 0);
+ const exam = Number($('pExamAmount')?.value || 0);
+ const school = Number($('schoolAmount')?.value || 0);
+ const van = Number($('vanAmount')?.value || 0);
+ const total = admission + renewal + exam + school + van;
+ const el = $('livePaymentTotal');
+ if (el) el.textContent = money(total);
 }
-$('schoolAmount').addEventListener('input',updateLivePaymentTotal);
-$('vanAmount').addEventListener('input',updateLivePaymentTotal);
-['pAdmissionAmount','pRenewalAmount','pExamAmount'].forEach(id=>{
- $(id).addEventListener('input',updateLivePaymentTotal);
+['pAdmissionAmount','pRenewalAmount','pExamAmount','schoolAmount','vanAmount'].forEach(id=>{
+ const input = $(id);
+ if(input){
+   input.addEventListener('input', updateLivePaymentTotal);
+   input.addEventListener('change', updateLivePaymentTotal);
+ }
 });
 $('pStudent').addEventListener('change',()=>{const s=students.find(x=>x.id===$('pStudent').value);if(s){$('schoolAmount').value=Number(s.monthlyFee||0)||'';$('vanAmount').value=s.vanService==='yes'?(Number(s.vanFee||0)||''):'';}else{$('schoolAmount').value='';$('vanAmount').value='';}updateFeePaymentFields();updateLivePaymentTotal()});
 $('sVanRoute').addEventListener('change',()=>{const route=$('sVanRoute').value;if(route)$('sVanFee').value=routeFeeForName(route);});
@@ -336,24 +340,21 @@ $('paymentForm').onsubmit=async e=>{
  const schoolAmount=Number($('schoolAmount').value||0),vanAmount=Number($('vanAmount').value||0);
  const schoolChecks=[...document.querySelectorAll('input[name="schoolMonth"]:checked')],vanChecks=[...document.querySelectorAll('input[name="vanMonth"]:checked')];
  const schoolMonths=schoolChecks.map(c=>({key:c.value,label:c.dataset.label})),vanMonths=vanChecks.map(c=>({key:c.value,label:c.dataset.label}));
- const selectedOther=['admission','renewal','exam'].includes(currentFeeType()),records=[];
- if(selectedOther){
-   const type=currentFeeType();
-   const otherAmount=Number(
-     type==='admission' ? $('pAdmissionAmount').value :
-     type==='renewal' ? $('pRenewalAmount').value :
-     type==='exam' ? $('pExamAmount').value : 0
-   );
-   if(!Number.isFinite(otherAmount)||otherAmount<=0){status('paymentStatus','Other fee ke liye amount enter karein.');return}
-   records.push({studentId:student.id,studentName:student.name,className:student.className,amount:otherAmount,date,feeYear:'',feeType:type,feeTypeLabel:FEE_TYPE_LABELS[type],feeSession:$('pFeeSession').value.trim()||currentAcademicSession(),feeMonths:[],feeMonthLabels:[],note,method,reference,createdAt:serverTimestamp()});
- }else{
-   if(schoolAmount>0&&!schoolMonths.length){status('paymentStatus','School Fee amount ke saath School Fee ke month bhi select karein.');return}
-   if(vanAmount>0&&!vanMonths.length){status('paymentStatus','Van Fee amount ke saath Van Fee ke month bhi select karein.');return}
-   if(vanAmount>0&&student.vanService!=='yes'){status('paymentStatus','This student is not registered for van service. Update the student details first.');return}
-   if(schoolAmount<=0&&!vanAmount){status('paymentStatus','School Fee ya Van Fee ka amount enter karein.');return}
-   if(schoolAmount>0)records.push({studentId:student.id,studentName:student.name,className:student.className,amount:schoolAmount,date,feeYear:year,feeType:'school',feeTypeLabel:FEE_TYPE_LABELS.school,feeSession:'',feeMonths:schoolMonths,feeMonthLabels:schoolMonths.map(m=>m.label),note,method,reference,createdAt:serverTimestamp()});
-   if(vanAmount>0)records.push({studentId:student.id,studentName:student.name,className:student.className,amount:vanAmount,date,feeYear:year,feeType:'van',feeTypeLabel:FEE_TYPE_LABELS.van,feeSession:'',feeMonths:vanMonths,feeMonthLabels:vanMonths.map(m=>m.label),note,method,reference,createdAt:serverTimestamp()});
- }
+ const records=[];
+ const feeSession=$('pFeeSession').value.trim()||currentAcademicSession();
+ const admissionAmount=Number($('pAdmissionAmount').value||0);
+ const renewalAmount=Number($('pRenewalAmount').value||0);
+ const examAmount=Number($('pExamAmount').value||0);
+ if([admissionAmount,renewalAmount,examAmount,schoolAmount,vanAmount].some(v=>!Number.isFinite(v)||v<0)){status('paymentStatus','Enter valid fee amounts.');return}
+ if(admissionAmount>0)records.push({studentId:student.id,studentName:student.name,className:student.className,amount:admissionAmount,date,feeYear:'',feeType:'admission',feeTypeLabel:FEE_TYPE_LABELS.admission,feeSession,feeMonths:[],feeMonthLabels:[],note,method,reference,createdAt:serverTimestamp()});
+ if(renewalAmount>0)records.push({studentId:student.id,studentName:student.name,className:student.className,amount:renewalAmount,date,feeYear:'',feeType:'renewal',feeTypeLabel:FEE_TYPE_LABELS.renewal,feeSession,feeMonths:[],feeMonthLabels:[],note,method,reference,createdAt:serverTimestamp()});
+ if(examAmount>0)records.push({studentId:student.id,studentName:student.name,className:student.className,amount:examAmount,date,feeYear:'',feeType:'exam',feeTypeLabel:FEE_TYPE_LABELS.exam,feeSession,feeMonths:[],feeMonthLabels:[],note,method,reference,createdAt:serverTimestamp()});
+ if(schoolAmount>0&&!schoolMonths.length){status('paymentStatus','School Fee amount ke saath School Fee ke month bhi select karein.');return}
+ if(vanAmount>0&&!vanMonths.length){status('paymentStatus','Van Fee amount ke saath Van Fee ke month bhi select karein.');return}
+ if(vanAmount>0&&student.vanService!=='yes'){status('paymentStatus','This student is not registered for van service. Update the student details first.');return}
+ if(schoolAmount>0)records.push({studentId:student.id,studentName:student.name,className:student.className,amount:schoolAmount,date,feeYear:year,feeType:'school',feeTypeLabel:FEE_TYPE_LABELS.school,feeSession:'',feeMonths:schoolMonths,feeMonthLabels:schoolMonths.map(m=>m.label),note,method,reference,createdAt:serverTimestamp()});
+ if(vanAmount>0)records.push({studentId:student.id,studentName:student.name,className:student.className,amount:vanAmount,date,feeYear:year,feeType:'van',feeTypeLabel:FEE_TYPE_LABELS.van,feeSession:'',feeMonths:vanMonths,feeMonthLabels:vanMonths.map(m=>m.label),note,method,reference,createdAt:serverTimestamp()});
+ if(!records.length){status('paymentStatus','Kam se kam ek fee amount enter karein.');return}
  try{
    const receiptNo='IPS-'+Date.now().toString().slice(-8);
    for(const record of records){record.receiptNo=receiptNo;await addDoc(collection(db,'payments'),record)}
