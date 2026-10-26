@@ -338,9 +338,56 @@ function showStudentArrears(id){
  ${s.vanService==='yes'?monthTable('2. Van Fee Pending Months',vanMissing,s.vanFee):'<div class="panel" style="margin-top:10px"><h3>2. Van Fee</h3><p class="help">This student is not registered for van service.</p></div>'}
  <div class="panel" style="margin-top:10px"><h3>3. Other Fees Pending</h3>${allDueRows.length?`<div class="tablewrap"><table><thead><tr><th>Fee Type</th><th>Amount Due</th></tr></thead><tbody>${allDueRows.map(r=>`<tr><td>${esc(r[0])}</td><td>${money(r[1])}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No pending Admission, Renewal or Exam Fee.</div>'}</div>
  <p class="help">Monthly School Fee and Van Fee months are shown separately based on recorded paid-month allocations. Old payments without month selections cannot be assigned to a month automatically.</p>
+ <div class="panel no-print" style="margin-top:12px;border:1px solid #cbd5e1;background:#f9fbff">
+   <h3>Share Pending Fee Notice</h3>
+   <p class="help">Recipient ka number optional hai. Fine aur last date bhi optional hain; khaali chhodenge to notice mein nahi aayenge.</p>
+   <div class="formgrid">
+     <div class="field"><label>Recipient Mobile (optional)</label><input id="pendingSharePhone" type="tel" inputmode="tel" maxlength="20" placeholder="10-digit mobile number"></div>
+     <div class="field"><label>Fee Jama Karne Ki Last Date (optional)</label><input id="pendingDueDate" type="date"></div>
+     <div class="field"><label>Late Fine (₹, optional)</label><input id="pendingFineAmount" type="number" min="0" max="100000" step="1" placeholder="e.g. 100"></div>
+   </div>
+   <div class="receipt-share-buttons" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+     <button type="button" class="whatsapp-share" id="sharePendingWhatsApp">WhatsApp Share</button>
+     <button type="button" class="sms-share" id="sharePendingSms">SMS Share</button>
+     <button type="button" class="secondary" id="sharePendingOther">Share Notice</button>
+     <button type="button" class="secondary" id="copyPendingNotice">Copy Notice Text</button>
+   </div>
+   <p class="help">Fine sirf notice mein likha jayega; app mein koi fine charge add nahi hoga. WhatsApp/SMS khulne ke baad aap khud Send karein.</p><div id="pendingShareStatus" class="status"></div>
+ </div>
  </div>`;
  el.scrollIntoView({behavior:'smooth',block:'start'});
  $('closeArrearsDetail').onclick=()=>{el.innerHTML='';};
+ const buildPendingNotice=()=>{
+   const dueDate=$('pendingDueDate').value;
+   const fineRaw=$('pendingFineAmount').value.trim();
+   const fine=fineRaw===''?null:Number(fineRaw);
+   if(fine!==null&&(!Number.isFinite(fine)||fine<0||fine>100000)){status('pendingShareStatus','Please enter a valid fine amount or leave it blank.');return null;}
+   const dateText=dueDate?new Date(dueDate+'T12:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'long',year:'numeric'}):'';
+   const lines=[
+     'IQRA PUBLIC SCHOOL (ENGLISH MEDIUM)',
+     'PENDING FEE NOTICE',
+     'Student: '+(s.name||'-'),
+     'Class: '+(s.className||'-')+(s.roll?' | Roll No: '+s.roll:''),
+     '',
+     'School Fee Pending: '+missing.length+' month(s) — '+(missing.length?missing.map(m=>m.label).join(', '):'No pending months'),
+     'School Fee Amount Due: '+money(schoolDue),
+     s.vanService==='yes'?'Van Fee Pending: '+vanMissing.length+' month(s) — '+(vanMissing.length?vanMissing.map(m=>m.label).join(', '):'No pending months'):'Van Fee: Not applicable',
+     s.vanService==='yes'?'Van Fee Amount Due: '+money(vanDue):'',
+     'Admission Fee Due: '+money(admissionPending),
+     'Renewal Fee Due: '+money(renewalPending),
+     'Exam Fee Due: '+money(examPending),
+     'TOTAL PENDING AMOUNT: '+money(due)
+   ].filter(Boolean);
+   if(dateText)lines.push('Please pay by: '+dateText+'.');
+   if(fine!==null&&fine>0)lines.push('Late fine if payment is not made by the above date: '+money(fine)+'.');
+   lines.push('Kindly deposit the pending fees on time. If already paid, please ignore this notice.','— Iqra Public School');
+   return lines.join('\n');
+ };
+ const normalizePendingPhone=()=>{let n=$('pendingSharePhone').value.replace(/[^0-9+]/g,'');if(n.startsWith('+'))n=n.slice(1);if(n.startsWith('0')&&n.length===11)n=n.slice(1);if(n.length===10)n='91'+n;return n};
+ $('sharePendingWhatsApp').onclick=()=>{const raw=$('pendingSharePhone').value.trim(),phone=normalizePendingPhone(),message=buildPendingNotice();if(!message)return;if(raw&&!/^\d{10,15}$/.test(phone)){status('pendingShareStatus','Enter a valid mobile number or leave it blank to choose a contact.');return}window.open('https://wa.me/'+(raw?phone:'')+'?text='+encodeURIComponent(message),'_blank','noopener,noreferrer')};
+ $('sharePendingSms').onclick=()=>{const raw=$('pendingSharePhone').value.trim(),phone=normalizePendingPhone(),message=buildPendingNotice();if(!message)return;if(raw&&!/^\d{10,15}$/.test(phone)){status('pendingShareStatus','Enter a valid mobile number or leave it blank if your messaging app lets you choose a recipient.');return}window.location.href='sms:'+(raw?phone:'')+'?body='+encodeURIComponent(message)};
+ $('sharePendingOther').onclick=async()=>{const message=buildPendingNotice();if(!message)return;try{if(navigator.share){await navigator.share({title:'Iqra Public School Pending Fee Notice',text:message});status('pendingShareStatus','Share menu opened.',true)}else{await navigator.clipboard.writeText(message);status('pendingShareStatus','Share menu unavailable; notice text copied.',true)}}catch(err){if(err.name!=='AbortError')status('pendingShareStatus','Could not open share menu. Use Copy Notice Text instead.')}};
+ $('copyPendingNotice').onclick=async()=>{const message=buildPendingNotice();if(!message)return;try{await navigator.clipboard.writeText(message);status('pendingShareStatus','Pending notice copied. Paste it into WhatsApp or SMS.',true)}catch(err){status('pendingShareStatus','Copy not available in this browser. Use WhatsApp or SMS Share.')}};
 }
 function renderPendingStudents(){const active=students.filter(s=>s.active!==false);const selectedClass=$('pendingClassFilter')?.value||'';const search=($('pendingSearch')?.value||'').trim().toLowerCase();const allRows=active.map(pendingForStudent).filter(x=>x.due>0);const rows=allRows.filter(({s})=>(!selectedClass||String(s.className)===selectedClass)&&(!search||[s.name,s.roll,s.guardian].join(' ').toLowerCase().includes(search)));const el=$('pendingStudents');if(!el)return;const classTotals=rows.reduce((sum,r)=>sum+r.due,0);el.innerHTML=rows.length?`<div class="ledger-summary">Students with pending fee: ${rows.length} &nbsp; | &nbsp; Tap the blue VIEW PENDING DETAILS button to see each unpaid month &nbsp; | &nbsp; Total pending for selected view: ${money(classTotals)}</div><div class="tablewrap"><table><thead><tr><th>Student (tap name)</th><th>Class</th><th>School Fee Pending Months</th><th>Total Pending (School + Van + Other)</th></tr></thead><tbody>${rows.map(({s,missing,due})=>`<tr><td><button type="button" class="primary actionbtn pending-student-name" data-arrears-student="${esc(s.id)}" style="display:inline-block;width:100%;min-width:145px;padding:12px 10px;margin:3px 0;font-weight:700;white-space:normal;cursor:pointer">${esc(s.name||'-')}<br><span style="font-size:12px;font-weight:600">👆 VIEW PENDING DETAILS</span></button><br><small>Roll: ${esc(s.roll||'-')}</small></td><td>${esc(s.className||'-')}</td><td><span class="tag red">${missing.length} month(s)</span><br><small>${esc(missing.map(m=>m.label).join(', '))}</small></td><td><b style="color:var(--red)">${money(due)}</b></td></tr>`).join('')}</tbody></table></div><div class="class-total">Total pending fee for ${selectedClass?`Class ${esc(selectedClass)}`:'all classes'}: ${money(classTotals)}</div>`:'<div class="empty">✅ No pending fee students match this class/search.</div>';el.querySelectorAll('[data-arrears-student]').forEach(b=>b.addEventListener('click',()=>showStudentArrears(b.dataset.arrearsStudent)))}
 $('pendingClassFilter').addEventListener('change',()=>{$('pendingStudentDetail').innerHTML='';renderPendingStudents()});
